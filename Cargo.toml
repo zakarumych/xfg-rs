@@ -4,3 +4,4 @@ version = "0.0.0"
 authors = ["omni-viral <scareaangel@gmail.com>"]
 description = "eXtensible Frame Graph based of gfx."
 license = "MIT/Apache-2.0"
+repository = "https://github.com/omni-viral/xfg-rs.git"
