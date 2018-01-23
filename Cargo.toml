@@ -8,7 +8,6 @@ repository = "https://github.com/omni-viral/xfg-rs.git"
 
 [dependencies]
 derivative = "1.0"
-failure = "0.1"
 gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
 relevant = "0.1"
 smallvec = "0.4"

@@ -1,27 +1,95 @@
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
 use std::ops::Range;
 use std::ptr::eq;
 
-use failure::{Error, ResultExt, err_msg};
 use gfx_hal::{Backend, Device};
-use gfx_hal::device::Extent;
+use gfx_hal::device::{Extent, FramebufferError, ShaderError};
 use gfx_hal::format::{AspectFlags, Format, Swizzle};
 use gfx_hal::image::{Kind, AaMode, Level, SubresourceRange, Usage};
 use gfx_hal::memory::Properties;
-use gfx_hal::pso::PipelineStage;
+use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
 
 use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachmentDesc, DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
 use graph::Graph;
 use pass::{PassBuilder, PassNode};
 
+
 pub const COLOR_RANGE: SubresourceRange = SubresourceRange {
     aspects: AspectFlags::COLOR,
     levels: 0..1,
     layers: 0..1,
 };
+
+
+#[derive(Debug, Clone)]
+pub enum GraphBuildError<E> {
+    FramebufferError,
+    ShaderError(ShaderError),
+    PresentationAttachmentNotSet,
+    BackbufferNotSet,
+    AllocationError(E),
+    Other,
+}
+
+impl<E> From<FramebufferError> for GraphBuildError<E> {
+    fn from(_: FramebufferError) -> Self {
+        GraphBuildError::FramebufferError
+    }
+}
+
+impl<E> From<ShaderError> for GraphBuildError<E> {
+    fn from(error: ShaderError) -> Self {
+        GraphBuildError::ShaderError(error)
+    }
+}
+
+impl<E> From<CreationError> for GraphBuildError<E> {
+    fn from(error: CreationError) -> Self {
+        match error {
+            CreationError::Other => GraphBuildError::Other,
+            CreationError::InvalidSubpass(_) => unreachable!("This should never happend"),
+            CreationError::Shader(error) => error.into(),
+        }
+    }
+}
+
+impl<A> fmt::Display for GraphBuildError<A>
+where
+    A: fmt::Display,
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("Failed to build graph: ")?;
+        match *self {
+            GraphBuildError::FramebufferError => fmt.write_str("framebuffer can't be created"),
+            GraphBuildError::ShaderError(ref error) => write!(fmt, "{:?}", error),
+            GraphBuildError::PresentationAttachmentNotSet => fmt.write_str("Presentation attachment wasn't set in GraphBuilder"),
+            GraphBuildError::BackbufferNotSet => fmt.write_str("Presentation attachment wasn't set in GraphBuilder"),
+            GraphBuildError::AllocationError(ref error) => write!(fmt, "{}", error),
+            GraphBuildError::Other => fmt.write_str("Unknown error has occured"),
+        }
+    }
+}
+
+impl<A> Error for GraphBuildError<A>
+where
+    A: Error,
+{
+    fn description(&self) -> &str {
+        "Failed to build graph"
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match *self {
+            GraphBuildError::AllocationError(ref error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 pub struct GraphBuilder<'a, B: Backend, T> {
     passes: Vec<PassBuilder<'a, B, T>>,
@@ -85,11 +153,11 @@ where
 
     /// Build rendering graph from `ColorPin`
     /// for specified `backbuffer`.
-    pub fn build<A, I>(
+    pub fn build<A, I, E>(
         self,
         device: &B::Device,
         mut allocator: A,
-    ) -> Result<Graph<B, I, T>, Error>
+    ) -> Result<Graph<B, I, T>, GraphBuildError<E>>
     where
         A: FnMut(
         Kind,
@@ -97,11 +165,11 @@ where
         Format,
         Usage,
         Properties,
-        &B::Device) -> Result<I, Error>,
+        &B::Device) -> Result<I, E>,
         I: Borrow<B::Image>,
     {
-        let present = self.present.ok_or(err_msg("Failed to build Graph. Present attachment has to be set"))?;
-        let backbuffer = self.backbuffer.ok_or(err_msg("Failed to build Graph. Backbuffer has to be set"))?;
+        let present = self.present.ok_or(GraphBuildError::PresentationAttachmentNotSet)?;
+        let backbuffer = self.backbuffer.ok_or(GraphBuildError::BackbufferNotSet)?;
         // Create views for backbuffer
         let (mut image_views, frames) = match *backbuffer {
             Backbuffer::Images(ref images) => (
@@ -116,7 +184,7 @@ where
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()
-                    .with_context(|err| format!("Failed to build graph: {}", err))?,
+                    .expect("Views are epxected to be created"),
                 images.len(),
             ),
             Backbuffer::Framebuffer(_) => (vec![], 1),
@@ -140,7 +208,7 @@ where
                 color_targets.insert(
                     attachment,
                     (
-                        create_target::<B, _, I>(
+                        create_target::<B, _, I, E>(
                             attachment.format,
                             &mut allocator,
                             device,
@@ -148,7 +216,8 @@ where
                             &mut image_views,
                             self.extent,
                             frames,
-                        )?,
+                            false,
+                        ).map_err(GraphBuildError::AllocationError)?,
                         0,
                     ),
                 );
@@ -160,7 +229,7 @@ where
             depth_stencil_targets.insert(
                 attachment,
                 (
-                    create_target::<B, _, I>(
+                    create_target::<B, _, I, E>(
                         attachment.format,
                         &mut allocator,
                         device,
@@ -168,7 +237,8 @@ where
                         &mut image_views,
                         self.extent,
                         frames,
-                    )?,
+                        true,
+                    ).map_err(GraphBuildError::AllocationError)?,
                     0,
                 ),
             );
@@ -375,7 +445,7 @@ where
     attachments
 }
 
-fn create_target<B, A, I>(
+fn create_target<B, A, I, E>(
     format: Format,
     mut allocator: A,
     device: &B::Device,
@@ -383,7 +453,8 @@ fn create_target<B, A, I>(
     views: &mut Vec<B::ImageView>,
     extent: Extent,
     frames: usize,
-) -> Result<Range<usize>, Error>
+    depth: bool,
+) -> Result<Range<usize>, E>
 where
     B: Backend,
     A: FnMut(
@@ -392,7 +463,7 @@ where
         Format,
         Usage,
         Properties,
-        &B::Device) -> Result<I, Error>,
+        &B::Device) -> Result<I, E>,
     I: Borrow<B::Image>,
 {
     let kind = Kind::D2(
@@ -406,11 +477,13 @@ where
             kind,
             1,
             format,
-            Usage::COLOR_ATTACHMENT,
+            if depth { Usage::DEPTH_STENCIL_ATTACHMENT } else { Usage::COLOR_ATTACHMENT },
             Properties::DEVICE_LOCAL,
             device,
         )?;
-        let view = device.create_image_view(image.borrow(), format, Swizzle::NO, COLOR_RANGE.clone())?;
+        let view = device
+            .create_image_view(image.borrow(), format, Swizzle::NO, COLOR_RANGE.clone())
+            .expect("Views are epxected to be created");
         views.push(view);
         images.push(image);
     }
@@ -486,23 +559,3 @@ where
     deps
 }
 
-/*
-/// Get dependencies of pass that aren't dependency of dependency.
-fn linear_dependencies<'a, B, T>(
-    passes: &'a [&'a PassBuilder<'a, B, T>],
-    pass: &'a PassBuilder<'a, B, T>,
-) -> Vec<&'a PassBuilder<'a, B, T>>
-where
-    B: Backend,
-{
-    let mut alldeps = direct_dependencies(passes, pass);
-    let mut newdeps = vec![];
-    while let Some(dep) = alldeps.pop() {
-        newdeps.push(dep);
-        let other = dependencies(passes, dep);
-        alldeps.retain(|dep| indices_in_of(&other, &[dep]).is_none());
-        newdeps.retain(|dep| indices_in_of(&other, &[dep]).is_none());
-    }
-    newdeps
-}
-*/

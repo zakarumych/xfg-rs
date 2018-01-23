@@ -9,7 +9,6 @@ use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::Viewport;
-use gfx_hal::device::{FramebufferError, ShaderError};
 use gfx_hal::pool::CommandPool;
 use gfx_hal::pso::PipelineStage;
 use gfx_hal::queue::CommandQueue;
@@ -21,34 +20,7 @@ use epoch::Epoch;
 use frame::SuperFrame;
 use pass::PassNode;
 
-pub use self::build::GraphBuilder;
-
-#[derive(Fail, Debug, Clone)]
-pub enum Error {
-    #[fail(display = "Failed to create framebuffer")] FramebufferError,
-
-    #[fail(display = "Shader compilation failed: {}", msg)] CompilationFailed { msg: String },
-
-    #[fail(display = "Missing shader entry point: {}", msg)] MissingEntryPoint { msg: String },
-
-    #[fail(display = "Shader interface mismatch: {}", msg)] InterfaceMismatch { msg: String },
-}
-
-impl From<FramebufferError> for Error {
-    fn from(_: FramebufferError) -> Error {
-        Error::FramebufferError
-    }
-}
-
-impl From<ShaderError> for Error {
-    fn from(error: ShaderError) -> Error {
-        match error {
-            ShaderError::CompilationFailed(msg) => Error::CompilationFailed { msg }.into(),
-            ShaderError::MissingEntryPoint(msg) => Error::MissingEntryPoint { msg }.into(),
-            ShaderError::InterfaceMismatch(msg) => Error::InterfaceMismatch { msg }.into(),
-        }
-    }
-}
+pub use self::build::{GraphBuilder, GraphBuildError};
 
 
 /// Directed acyclic rendering graph.

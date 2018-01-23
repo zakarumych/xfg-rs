@@ -1,5 +1,4 @@
 
-use failure::Error;
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearValue};
 use gfx_hal::device::Extent;
@@ -12,6 +11,7 @@ use smallvec::SmallVec;
 use attachment::{Attachment, ColorAttachment, DepthStencilAttachment, AttachmentImageViews, ColorAttachmentDesc, DepthStencilAttachmentDesc, InputAttachmentDesc};
 use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
+use graph::GraphBuildError;
 use pass::{AnyPass, Pass, PassNode};
 use vertex::VertexFormat;
 
@@ -73,14 +73,14 @@ where
     }
 
     /// Build `PassNode`
-    pub(crate) fn build(
+    pub(crate) fn build<E>(
         self,
         device: &B::Device,
         inputs: &[InputAttachmentDesc<B>],
         colors: &[ColorAttachmentDesc<B>],
         depth_stencil: Option<DepthStencilAttachmentDesc<B>>,
         extent: Extent,
-    ) -> Result<PassNode<B, T>, Error> {
+    ) -> Result<PassNode<B, T>, GraphBuildError<E>> {
         // Check attachments
         assert_eq!(inputs.len(), self.pass.inputs());
         assert_eq!(colors.len(), self.pass.colors());
@@ -217,7 +217,7 @@ where
         let graphics_pipeline = {
             // Init basic configuration
             let mut pipeline_desc = pso::GraphicsPipelineDesc::new(
-                self.pass.shaders(&mut shaders, device).map_err(::graph::Error::from)?,
+                self.pass.shaders(&mut shaders, device)?,
                 self.primitive,
                 self.rasterizer.clone(),
                 &pipeline_layout,
@@ -323,8 +323,7 @@ where
                 SuperFramebuffer::Owned(frames
                     .iter()
                     .map(|targets| device.create_framebuffer(&render_pass, targets, extent))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(::graph::Error::from)?)
+                    .collect::<Result<Vec<_>, _>>()?)
             }
         };
 
