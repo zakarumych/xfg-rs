@@ -5,18 +5,15 @@ mod build;
 pub use self::build::PassBuilder;
 
 use std::fmt::Debug;
-use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::{CommandBuffer, RenderPassInlineEncoder, ClearValue, Rect};
 use gfx_hal::device::ShaderError;
-use gfx_hal::pso::{DescriptorSetLayoutBinding, GraphicsShaderSet, PipelineStage};
+use gfx_hal::format::Format;
+use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet, PipelineStage};
 use gfx_hal::queue::capability::{Supports, Transfer, Graphics};
 
 use smallvec::SmallVec;
-
-use epoch::Epoch;
-use vertex::VertexFormat;
 
 use bindings::{Binder, BindingsList, Layout};
 use descriptors::DescriptorPool;
@@ -54,7 +51,7 @@ where
     const STENCIL: bool;
 
     /// Vertices format
-    const VERTICES: &'static [VertexFormat<'static>];
+    const VERTICES: &'static [(&'static [Element<Format>], ElemStride)];
 
     type Bindings: BindingsList;
 
@@ -81,7 +78,6 @@ where
     /// Bind buffers. Transfer data.
     fn prepare<'a, C>(
         &mut self,
-        span: Range<Epoch>,
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, C>,
         device: &B::Device,
@@ -92,7 +88,6 @@ where
     /// Record actual drawing commands in inline fashion.
     fn draw_inline<'a>(
         &mut self,
-        span: Range<Epoch>,
         binder: Binder<B, Self::Bindings>,
         encoder: RenderPassInlineEncoder<B>,
         device: &B::Device,
@@ -128,7 +123,7 @@ where
     fn bindings(&self) -> SmallVec<[DescriptorSetLayoutBinding; 64]>;
 
     /// Vertices format
-    fn vertices(&self) -> &'static [VertexFormat<'static>];
+    fn vertices(&self) -> &'static [(&'static [Element<Format>], ElemStride)];
 
     /// Load shaders
     fn shaders<'a>(
@@ -142,7 +137,6 @@ where
     /// [`Pass::prepare`]: trait.Pass.html#tymethod.prepare
     fn prepare(
         &mut self,
-        span: Range<Epoch>,
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
@@ -154,7 +148,6 @@ where
     /// [`Pass::draw_inline`]: trait.Pass.html#tymethod.draw_inline
     fn draw_inline(
         &mut self,
-        span: Range<Epoch>,
         layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B>,
         device: &B::Device,
@@ -200,7 +193,7 @@ where
     }
 
     /// Vertices format
-    fn vertices(&self) -> &'static [VertexFormat<'static>] {
+    fn vertices(&self) -> &'static [(&'static [Element<Format>], ElemStride)] {
         P::VERTICES
     }
 
@@ -215,7 +208,6 @@ where
 
     fn prepare(
         &mut self,
-        span: Range<Epoch>,
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
@@ -223,7 +215,6 @@ where
     ) {
         P::prepare(
             self,
-            span,
             pool,
             cbuf,
             device,
@@ -233,7 +224,6 @@ where
 
     fn draw_inline<'a>(
         &mut self,
-        span: Range<Epoch>,
         layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B>,
         device: &B::Device,
@@ -242,7 +232,6 @@ where
         let binder = Binder::<B, P::Bindings>::new(layout, P::layout(Layout::new()));
         P::draw_inline(
             self,
-            span,
             binder,
             encoder,
             device,
@@ -275,9 +264,16 @@ impl<B, T> PassNode<B, T>
 where
     B: Backend,
 {
+    /// Prepares to record actual drawing command.
+    /// This is called outside of renderpass. And has exclusive acces for `T`.
+    /// `PassNode::prepare` function is called sequentially for all passes.
+    /// Thus it is required to be fast.
+    /// 
+    /// `cbuf` - command buffer to record transfer commands.
+    /// `device` - to do stuff.
+    /// `aux` - auxiliary data for passes.
     pub fn prepare<C>(
         &mut self,
-        span: Range<Epoch>,
         cbuf: &mut CommandBuffer<B, C>,
         device: &B::Device,
         aux: &mut T,
@@ -288,23 +284,20 @@ where
         // * Write descriptor sets
         // * Store caches
         // * Bind pipeline layout with descriptors sets
-        self.pass.prepare(span.clone(), &mut self.descriptors, cbuf.downgrade(), device, aux);
+        self.pass.prepare(&mut self.descriptors, cbuf.downgrade(), device, aux);
     }
-
 
     /// Binds pipeline and renderpass to the command buffer `cbuf`.
     /// Executes `Pass::prepare` and `Pass::draw_inline` of the inner `Pass`
     /// to record transfer and draw commands.
     ///
-    /// `res` - primary source of data (`Mesh`es, `Texture`s etc) for the `Pass`es.
+    /// `cbuf` - command buffer to record drawing commands.
     /// `rect` - area to draw in.
     /// `frame` - specifies which framebuffer and descriptor sets to use.
-    /// `span` - commands will be executed in specified epoch range. Pass should ensure all resources
-    /// are valid for execution span.
-    ///
+    /// `device` - to do stuff.
+    /// `aux` - auxiliary data for passes.
     pub fn draw_inline<C>(
         &mut self,
-        span: Range<Epoch>,
         cbuf: &mut CommandBuffer<B, C>,
         rect: Rect,
         frame: SuperFrame<B>,
@@ -328,7 +321,6 @@ where
 
         // Record custom drawing calls
         self.pass.draw_inline(
-            span,
             &self.pipeline_layout,
             encoder,
             device,

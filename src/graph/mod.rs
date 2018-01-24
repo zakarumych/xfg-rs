@@ -5,7 +5,6 @@
 //! 
 
 mod build;
-use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::Viewport;
@@ -16,7 +15,6 @@ use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
 
-use epoch::Epoch;
 use frame::SuperFrame;
 use pass::PassNode;
 
@@ -55,18 +53,15 @@ where
     /// All those should be created by `device`.
     ///
     /// `frame` - frame index that should be drawn.
-    /// `upload` - semaphore that will be signaled when all data will be uploaded.
     /// (or `Framebuffer` reference that corresponds to index `0`)
-    /// `acquire` - semaphore that should be waited on by submissions which
-    /// contains commands from passes that draw to the surface
-    /// `device` - you need this guy everywhere =^_^=
+    /// `acquire` - surface acqisition semaphore.
+    /// `release` - presentation will wait on this.
     /// `viewport` - portion of framebuffers to draw
-    /// `res` - primary source of stuff to draw
     /// `finish` - last submission should set this fence
-    /// `span` - all commands will be finished before this epoch ends.
+    /// `device` - you need this guy everywhere =^_^=
+    /// `aux` - auxiliary data for passes.
     pub fn draw_inline<C>(
         &mut self,
-        span: Range<Epoch>,
         queue: &mut CommandQueue<B, C>,
         pool: &mut CommandPool<B, C>,
         frame: SuperFrame<B>,
@@ -96,7 +91,6 @@ where
 
             // Record commands for pass
             pass.draw_inline(
-                span.clone(),
                 &mut cbuf,
                 viewport.rect,
                 frame.clone(),

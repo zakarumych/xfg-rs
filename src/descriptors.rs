@@ -1,12 +1,7 @@
 
-use std::marker::PhantomData;
-use std::ops::Range;
-
 use gfx_hal::{Backend, Device};
 use gfx_hal::pso::{DescriptorPool as RawDescriptorPool, DescriptorRangeDesc,
                    DescriptorSetLayoutBinding, DescriptorType};
-
-use epoch::Epoch;
 
 const CAPACITY: usize = 1024 * 32;
 

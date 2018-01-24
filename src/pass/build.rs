@@ -2,6 +2,7 @@
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearValue};
 use gfx_hal::device::Extent;
+use gfx_hal::format::Format;
 use gfx_hal::image;
 use gfx_hal::pass;
 use gfx_hal::pso;
@@ -13,7 +14,6 @@ use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
 use graph::GraphBuildError;
 use pass::{AnyPass, Pass, PassNode};
-use vertex::VertexFormat;
 
 
 /// Collection of data required to construct rendering pass
@@ -245,8 +245,8 @@ where
             });
 
             // Add all vertex descriptors
-            for vertex in self.pass.vertices() {
-                push_vertex_desc(vertex, &mut pipeline_desc);
+            for &(attributes, stride) in self.pass.vertices() {
+                push_vertex_desc(attributes, stride, &mut pipeline_desc);
             }
 
             // Create `GraphicsPipeline`
@@ -340,14 +340,14 @@ where
     }
 }
 
-fn push_vertex_desc<B>(format: &VertexFormat, pipeline_desc: &mut pso::GraphicsPipelineDesc<B>)
+fn push_vertex_desc<B>(attributes: &[pso::Element<Format>], stride: pso::ElemStride, pipeline_desc: &mut pso::GraphicsPipelineDesc<B>)
 where
     B: Backend,
 {
     let index = pipeline_desc.vertex_buffers.len() as pso::BufferIndex;
 
     pipeline_desc.vertex_buffers.push(pso::VertexBufferDesc {
-        stride: format.stride,
+        stride,
         rate: 0,
     });
 
@@ -356,11 +356,11 @@ where
         .last()
         .map(|a| a.location + 1)
         .unwrap_or(0);
-    for attribute in format.attributes.iter() {
+    for &attribute in attributes {
         pipeline_desc.attributes.push(pso::AttributeDesc {
             location,
             binding: index,
-            element: attribute.2,
+            element: attribute,
         });
         location += 1;
     }
