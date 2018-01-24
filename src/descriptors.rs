@@ -6,36 +6,9 @@ use gfx_hal::{Backend, Device};
 use gfx_hal::pso::{DescriptorPool as RawDescriptorPool, DescriptorRangeDesc,
                    DescriptorSetLayoutBinding, DescriptorType};
 
-use cirque::{Cirque, Entry, EntryMut};
 use epoch::Epoch;
 
 const CAPACITY: usize = 1024 * 32;
-
-/// Descriptor set tagged by type.
-/// So that multiple descriptor sets can be attached to the entity.
-pub struct DescriptorSet<B: Backend, T>(Cirque<B::DescriptorSet>, PhantomData<fn() -> T>);
-impl<B, T> DescriptorSet<B, T>
-where
-    B: Backend,
-{
-    pub fn new() -> Self {
-        DescriptorSet(Cirque::new(), PhantomData)
-    }
-
-    pub fn get_mut<'a>(&'a mut self, span: Range<Epoch>) -> EntryMut<'a, B::DescriptorSet> {
-        self.0.get_mut(span)
-    }
-
-    pub fn get<'a>(&'a mut self, span: Range<Epoch>) -> Entry<'a, B::DescriptorSet> {
-        self.0.get(span)
-    }
-
-    pub unsafe fn dispose(mut self, pool: &mut DescriptorPool<B>) {
-        for (_, set) in self.0.drain() {
-            pool.free(set);
-        }
-    }
-}
 
 /// Simple growing wrapper for `Backend::DescriptorPool`.
 #[derive(Debug)]
