@@ -1,11 +1,11 @@
-//! Defines attachment descriptions for framegraph.
+//! Defines attachments for the rendering `Graph`.
+//!
 
 use std::ptr::eq;
 
 use gfx_hal::Backend;
 use gfx_hal::command::{ClearColor, ClearDepthStencil};
 use gfx_hal::format::{AspectFlags, Format};
-
 
 /// Attachment declaration with color format.
 #[derive(Debug)]
@@ -29,14 +29,14 @@ impl ColorAttachment {
     }
 
     /// Set clearing color for the attachment.
-    /// First pass that uses it as output will clear it.
+    /// First pass that use the attachment as output will clear it.
     pub fn with_clear(mut self, clear: ClearColor) -> Self {
         self.set_clear(clear);
         self
     }
 
     /// Set clearing color for the attachment.
-    /// First pass that uses it as output will clear it.
+    /// First pass that use the attachment as output will clear it.
     pub fn set_clear(&mut self, clear: ClearColor) {
         self.clear = Some(clear);
     }
@@ -68,13 +68,13 @@ impl DepthStencilAttachment {
     }
 
     /// Set clearing values for the attachment.
-    /// First pass that uses it as output will clear it.
+    /// First pass that use the attachment as output will clear it.
     pub fn set_clear(&mut self, clear: ClearDepthStencil) {
         self.clear = Some(clear);
     }
 
     /// Set clearing values for the attachment.
-    /// First pass that uses it as output will clear it.
+    /// First pass that use the attachment as output will clear it.
     pub fn with_clear(mut self, clear: ClearDepthStencil) -> Self {
         self.set_clear(clear);
         self
@@ -86,7 +86,7 @@ impl DepthStencilAttachment {
 }
 
 
-/// Reference to either color or depth-stencil attachmen declaration.
+/// Reference to either color or depth-stencil attachment declaration.
 #[derive(Clone, Copy, Debug)]
 pub enum Attachment<'a> {
     Color(&'a ColorAttachment),

@@ -1,4 +1,3 @@
-
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::error::Error;
@@ -18,21 +17,27 @@ use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachm
 use graph::Graph;
 use pass::{PassBuilder, PassNode};
 
-
+/// Color range for render targets
 pub const COLOR_RANGE: SubresourceRange = SubresourceRange {
     aspects: AspectFlags::COLOR,
     levels: 0..1,
     layers: 0..1,
 };
 
-
+/// Possible errors during graph building
 #[derive(Debug, Clone)]
 pub enum GraphBuildError<E> {
+    /// Framebuffer could not be created
     FramebufferError,
+    /// Shader module creation error
     ShaderError(ShaderError),
+    /// If no presentation render target is set
     PresentationAttachmentNotSet,
+    /// If no backbuffer is set
     BackbufferNotSet,
+    /// Allocation errors as returned by the `allocator` function given to `GraphBuilder::build`
     AllocationError(E),
+    /// Any other errors encountered during graph builder, such as graphics pipeline creation errors
     Other,
 }
 
@@ -91,6 +96,12 @@ where
     }
 }
 
+/// Graph builder
+///
+/// ### Type parameters:
+///
+/// - `B`: render `Backend`
+/// - `T`: auxiliary data used by the `Pass`es in the `Graph`
 pub struct GraphBuilder<'a, B: Backend, T> {
     passes: Vec<PassBuilder<'a, B, T>>,
     present: Option<&'a ColorAttachment>,
@@ -102,6 +113,7 @@ impl<'a, B, T> GraphBuilder<'a, B, T>
 where
     B: Backend,
 {
+    /// Create a new `GraphBuilder`
     pub fn new() -> Self {
         GraphBuilder {
             passes: Vec::new(),
@@ -115,44 +127,94 @@ where
         }
     }
 
+    /// Add a `Pass` to the `Graph`
+    ///
+    /// ### Parameters:
+    ///
+    /// - `pass`: pass builder
     pub fn with_pass(mut self, pass: PassBuilder<'a, B, T>) -> Self {
         self.add_pass(pass);
         self
     }
 
+    /// Add a `Pass` to the `Graph`
+    ///
+    /// ### Parameters:
+    ///
+    /// - `pass`: pass builder
     pub fn add_pass(&mut self, pass: PassBuilder<'a, B, T>) {
         self.passes.push(pass);
     }
 
+    /// Set the extent of the framebuffers
+    ///
+    /// ### Parameters:
+    ///
+    /// - `extent`: hal `Extent`
     pub fn with_extent(mut self, extent: Extent) -> Self {
         self.set_extent(extent);
         self
     }
 
+    /// Set the extent of the framebuffers
+    ///
+    /// ### Parameters:
+    ///
+    /// - `extent`: hal `Extent`
     pub fn set_extent(&mut self, extent: Extent) {
         self.extent = extent;
     }
 
+    /// Set the backbuffer to use
+    ///
+    /// ### Parameters:
+    ///
+    /// - `backbuffer`: hal `Backbuffer`
     pub fn with_backbuffer(mut self, backbuffer: &'a Backbuffer<B>) -> Self {
         self.set_backbuffer(backbuffer);
         self
     }
 
+    /// Set the backbuffer to use
+    ///
+    /// ### Parameters:
+    ///
+    /// - `backbuffer`: hal `Backbuffer`
     pub fn set_backbuffer(&mut self, backbuffer: &'a Backbuffer<B>) {
         self.backbuffer = Some(backbuffer);
     }
 
+    /// Set presentation draw surface
+    ///
+    /// ### Parameters:
+    ///
+    /// - `present`: color attachment to use as presentation draw surface for the `Graph`
     pub fn with_present(mut self, present: &'a ColorAttachment) -> Self {
         self.set_present(present);
         self
     }
 
+    /// Set presentation draw surface
+    ///
+    /// ### Parameters:
+    ///
+    /// - `present`: color attachment to use as presentation draw surface for the `Graph`
     pub fn set_present(&mut self, present: &'a ColorAttachment) {
         self.present = Some(present);
     }
 
-    /// Build rendering graph from `ColorPin`
-    /// for specified `backbuffer`.
+    /// Build rendering graph
+    ///
+    /// ### Parameters:
+    ///
+    /// - `device`: graphics device
+    /// - `allocator`: allocator function used for creating render targets
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `A`: allocator function
+    /// - `I`: render target image type
+    /// - `E`: errors returned by the allocator function
     pub fn build<A, I, E>(
         self,
         device: &B::Device,
@@ -483,7 +545,7 @@ where
         )?;
         let view = device
             .create_image_view(image.borrow(), format, Swizzle::NO, COLOR_RANGE.clone())
-            .expect("Views are epxected to be created");
+            .expect("Views are expected to be created");
         views.push(view);
         images.push(image);
     }

@@ -6,6 +6,10 @@ use gfx_hal::pso::{DescriptorPool as RawDescriptorPool, DescriptorRangeDesc,
 const CAPACITY: usize = 1024 * 32;
 
 /// Simple growing wrapper for `Backend::DescriptorPool`.
+///
+/// ### Type parameters:
+///
+/// - `B`: hal `Backend`
 #[derive(Debug)]
 pub struct DescriptorPool<B: Backend> {
     range: Vec<DescriptorRangeDesc>,
@@ -19,7 +23,12 @@ impl<B> DescriptorPool<B>
 where
     B: Backend,
 {
-    /// Create new pool with bindings list
+    /// Create a new descriptor pool for the given bindings list
+    ///
+    /// ### Parameters:
+    ///
+    /// - `bindings`: bindings given by a single `Pass`
+    /// - `device`: graphics device
     pub fn new(bindings: &[DescriptorSetLayoutBinding], device: &B::Device) -> Self {
         let range = bindings_to_range_desc(bindings);
         DescriptorPool {
@@ -32,6 +41,10 @@ where
     }
 
     /// Dispose of all allocated sets and pools.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `device`: graphics device
     pub fn dispose(self, device: &B::Device) {
         assert_eq!(self.count, self.sets.len());
         #[cfg(feature = "gfx-metal")]
@@ -46,12 +59,16 @@ where
         device.destroy_descriptor_set_layout(self.layout);
     }
 
-    /// Get descriptos layout
+    /// Get descriptor set layout.
     pub fn layout(&self) -> &B::DescriptorSetLayout {
         &self.layout
     }
 
-    /// Allocate on descriptor set
+    /// Allocate a descriptor set on the given device.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `device`: graphics device
     pub fn allocate(&mut self, device: &B::Device) -> B::DescriptorSet {
         if self.sets.is_empty() {
             // Check if there is sets available
@@ -75,6 +92,10 @@ where
     }
 
     /// Free descriptor set
+    ///
+    /// ### Parameters:
+    ///
+    /// - `set`: descriptor set to free (returns the set to the pool)
     pub fn free(&mut self, set: B::DescriptorSet) {
         self.sets.push(set);
     }

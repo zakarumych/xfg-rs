@@ -1,10 +1,13 @@
 //!
-//! Defines `Graph` - complex rendering graph.
-//! And `Pass` - building block for `Graph`.
+//! Defines a directed acyclic rendering `Graph`.
+//!
+//! A rendering `Graph` is built up from a list of `Pass`es, a `Backbuffer`, an `Extent`, and a
+//! draw surface. See `GraphBuilder` for more information about creating graphs.
+//!
 //! TODO: compute.
 //! 
 
-mod build;
+pub use self::build::{GraphBuilder, GraphBuildError};
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::Viewport;
@@ -18,11 +21,19 @@ use smallvec::SmallVec;
 use frame::SuperFrame;
 use pass::PassNode;
 
-pub use self::build::{GraphBuilder, GraphBuildError};
-
+mod build;
 
 /// Directed acyclic rendering graph.
-/// It holds all rendering nodes and auxiliary data.
+///
+/// It contains all data needed for preparing and drawing frames using the graph. Auxiliary data
+/// used by the passes should be supplied from the outside for each frame.
+///
+/// ### Type parameters:
+///
+/// - `B`: render `Backend`
+/// - `I`: render target image type
+/// - `T`: auxiliary data used by the graph, user supplied, not touched by the graph itself, only
+///        passed on to the `Pass`es
 #[derive(Debug)]
 pub struct Graph<B: Backend, I, T> {
     passes: Vec<PassNode<B, T>>,
@@ -37,6 +48,7 @@ impl<B, I, T> Graph<B, I, T>
 where
     B: Backend,
 {
+    /// Start building the render graph
     pub fn build<'a>() -> GraphBuilder<'a, B, T> {
         GraphBuilder::new()
     }
@@ -52,14 +64,22 @@ where
     /// `queue` must come from same `QueueGroup` with which `pool` is associated.
     /// All those should be created by `device`.
     ///
-    /// `frame` - frame index that should be drawn.
-    /// (or `Framebuffer` reference that corresponds to index `0`)
-    /// `acquire` - surface acqisition semaphore.
-    /// `release` - presentation will wait on this.
-    /// `viewport` - portion of framebuffers to draw
-    /// `finish` - last submission should set this fence
-    /// `device` - you need this guy everywhere =^_^=
-    /// `aux` - auxiliary data for passes.
+    /// ### Parameters
+    ///
+    /// - `queue`: queue that commands will be submitted to
+    /// - `pool`: command buffer pool to use
+    /// - `frame`: frame index that should be drawn.
+    ///             (or `Framebuffer` reference that corresponds to index `0`)
+    /// - `acquire`: surface acquisition semaphore.
+    /// - `release`: presentation will wait on this.
+    /// - `viewport`: portion of framebuffers to draw to
+    /// - `finish`: last submission should set this fence
+    /// - `device`: you need this guy everywhere =^_^=
+    /// - `aux`: auxiliary data for passes.
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `C`: hal `Capability`
     pub fn draw_inline<C>(
         &mut self,
         queue: &mut CommandQueue<B, C>,
@@ -139,6 +159,19 @@ where
         });
     }
 
+    /// Dispose of the graph, will call `dispose` on all passes, and clean up any `Semaphore`s,
+    /// `ImageView`s, and images created by the `Graph` or `GraphBuilder`.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `deallocator`: used for image deallocation, should match up with the `allocator` used in
+    ///                  `GraphBuilder::build`.
+    /// - `device`: graphics device
+    /// - `aux`: auxiliary data used by the `Graph` and the `Pass`es in the graph.
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `F`: deallocator function
     pub fn dispose<F>(self, mut deallocator: F, device: &B::Device, aux: &mut T)
     where
         F: FnMut(I, &B::Device),

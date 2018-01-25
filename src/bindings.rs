@@ -9,9 +9,9 @@ use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorTyp
 use smallvec::SmallVec;
 use relevant::Relevant;
 
-/// Single binding.
-/// Type and count are constant for particular type
-/// binding index and stage flags are specified during creation.
+/// Single descriptor binding.
+/// Type and count are constant for each binding type, while binding index and stage flags are
+/// specified during binding creation.
 pub trait Binding: Copy {
     /// Type of the binding.
     const TY: DescriptorType;
@@ -27,6 +27,10 @@ pub trait Binding: Copy {
 }
 
 /// Uniform non-array binding type.
+///
+/// ### Type parameters:
+///
+/// - `T`: type expected by shaders using the binding
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug)]
 pub struct Uniform<T> {
@@ -36,7 +40,13 @@ pub struct Uniform<T> {
 }
 
 impl<T> Uniform<T> {
-    /// Bind uniform to the set.
+    /// Bind uniform to the given descriptor set.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `set`: descriptor set to bind uniform to
+    /// - `buffer`: buffer where the uniform is located
+    /// - `range`: byte range in the buffer where the uniform is located
     fn bind<'a, 'b, B>(
         self,
         set: &'a B::DescriptorSet,
@@ -70,8 +80,8 @@ impl<T> Binding for Uniform<T> {
     }
 }
 
-/// List of bindings.
-/// `()` is empty list, `(H, T)` is `BindingsLists` when `H: Binding` and `T: BindingsList`.
+/// Heterogeneous list of descriptor bindings.
+/// `()` is an empty list, `(H, T)` is `BindingsLists` where `H: Binding` and `T: BindingsList`.
 pub trait BindingsList: Copy {
     /// Fill bindings structures.
     fn fill<E>(self, extend: &mut E)
@@ -103,13 +113,17 @@ where
 }
 
 /// Pipeline layout type-level representation.
+///
+/// ### Type parameters:
+///
+/// - `L`: `BindingsList`
 #[derive(Copy, Clone)]
 pub struct Layout<L> {
     bindings: L,
 }
 
 impl Layout<()> {
-    /// Crate empty layout.
+    /// Create an empty layout.
     pub(crate) fn new() -> Self {
         Layout { bindings: () }
     }
@@ -120,8 +134,11 @@ where
     L: BindingsList,
 {
     /// Add uniform binding to the layout.
-    /// binding - index of the binding.
-    /// stage - stage or stage flags.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `binding`: index of the binding.
+    /// - `stage`: stage or stage flags.
     pub fn uniform<T, S: Into<ShaderStageFlags>>(
         self,
         binding: usize,
@@ -141,7 +158,7 @@ where
         bindings
     }
 
-    /// Add element to the layout.
+    /// Add binding to the layout.
     fn with<B>(self, binding: B) -> Layout<(B, L)> {
         Layout {
             bindings: (binding, self.bindings),
@@ -149,7 +166,12 @@ where
     }
 }
 
-/// Binder can be used to bind bindings. =^___^=
+/// Binder can be used to bind bindings to a descriptor set.
+///
+/// ### Type parameters:
+///
+/// - `B`: hal `Backend`
+/// - `L`: `BindingsList`
 pub struct Binder<'a, B: Backend, L> {
     layout: &'a B::PipelineLayout,
     bindings: L,
@@ -186,7 +208,13 @@ where
     }
 }
 
-/// Allows to bind descriptors to the contained set.
+/// Binder to bind bindings to the contained descriptor set, and update encountered uniforms on the
+/// graphics device.
+///
+/// ### Type parameters:
+///
+/// - `B`: hal `Backend`
+/// - `L`: `BindingsList`
 pub struct SetBinder<'a, 'b, B: Backend, L> {
     relevant: Relevant,
     bindings: L,
