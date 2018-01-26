@@ -120,7 +120,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `binder`: binder used to bind bindings to descriptor sets
+    /// - `layout`: pipeline layout
     /// - `encoder`: encoder used to record drawing commands
     /// - `device`: graphics device
     /// - `aux`: auxiliary data
