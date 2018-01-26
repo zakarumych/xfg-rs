@@ -10,8 +10,8 @@ use gfx_hal::format::{AspectFlags, Format};
 /// Attachment declaration with color format.
 #[derive(Debug)]
 pub struct ColorAttachment {
-    pub format: Format,
-    pub clear: Option<ClearColor>,
+    pub(crate) format: Format,
+    pub(crate) clear: Option<ClearColor>,
 }
 
 impl ColorAttachment {
@@ -49,8 +49,8 @@ impl ColorAttachment {
 /// Attachment declaration with depth-stencil format.
 #[derive(Debug)]
 pub struct DepthStencilAttachment {
-    pub format: Format,
-    pub clear: Option<ClearDepthStencil>,
+    pub(crate) format: Format,
+    pub(crate) clear: Option<ClearDepthStencil>,
 }
 
 impl DepthStencilAttachment {
@@ -88,13 +88,16 @@ impl DepthStencilAttachment {
 /// Reference to either color or depth-stencil attachment declaration.
 #[derive(Clone, Copy, Debug)]
 pub enum Attachment<'a> {
+    /// Color attachment
     Color(&'a ColorAttachment),
+
+    /// Depth-stencil attachment
     DepthStencil(&'a DepthStencilAttachment),
 }
 
 impl<'a> Attachment<'a> {
     /// Get format of the attachment.
-    pub fn format(self) -> Format {
+    pub(crate) fn format(self) -> Format {
         match self {
             Attachment::Color(color) => color.format,
             Attachment::DepthStencil(depth) => depth.format,

@@ -14,7 +14,6 @@ use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
 
-use bindings::{Binder, BindingsList, Layout};
 use descriptors::DescriptorPool;
 use frame::{pick, SuperFrame, SuperFramebuffer};
 
@@ -56,10 +55,8 @@ where
     /// Vertex formats required by the pass
     const VERTICES: &'static [(&'static [Element<Format>], ElemStride)];
 
-    type Bindings: BindingsList;
-
-    /// Fill layout with bindings
-    fn layout(Layout<()>) -> Layout<Self::Bindings>;
+    /// Bindings for the descriptor sets used by the pass
+    const BINDINGS: &'static [DescriptorSetLayoutBinding];
 
     /// Build render pass
     fn build() -> PassBuilder<'static, B, T>
@@ -129,7 +126,7 @@ where
     /// - `aux`: auxiliary data
     fn draw_inline<'a>(
         &mut self,
-        binder: Binder<B, Self::Bindings>,
+        layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B>,
         device: &B::Device,
         aux: &T,
@@ -171,7 +168,7 @@ where
     fn stencil(&self) -> bool;
 
     /// Bindings for the descriptor sets used by the pass
-    fn bindings(&self) -> SmallVec<[DescriptorSetLayoutBinding; 64]>;
+    fn bindings(&self) -> &'static [DescriptorSetLayoutBinding];
 
     /// Vertex formats required by the pass
     fn vertices(&self) -> &'static [(&'static [Element<Format>], ElemStride)];
@@ -244,8 +241,8 @@ where
     }
 
     /// Bindings
-    fn bindings(&self) -> SmallVec<[DescriptorSetLayoutBinding; 64]> {
-        Self::layout(Layout::new()).bindings()
+    fn bindings(&self) -> &'static [DescriptorSetLayoutBinding] {
+        P::BINDINGS
     }
 
     /// Vertices format
@@ -279,8 +276,7 @@ where
         device: &B::Device,
         aux: &T,
     ) {
-        let binder = Binder::<B, P::Bindings>::new(layout, P::layout(Layout::new()));
-        P::draw_inline(self, binder, encoder, device, aux);
+        P::draw_inline(self, layout, encoder, device, aux);
     }
 
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T) {

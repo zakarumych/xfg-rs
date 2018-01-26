@@ -24,9 +24,9 @@ use pass::{AnyPass, Pass, PassNode};
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct PassBuilder<'a, B: Backend, T> {
-    pub inputs: Vec<Option<Attachment<'a>>>,
-    pub colors: Vec<Option<&'a ColorAttachment>>,
-    pub depth_stencil: Option<(Option<&'a DepthStencilAttachment>, bool)>,
+    pub(crate) inputs: Vec<Option<Attachment<'a>>>,
+    pub(crate) colors: Vec<Option<&'a ColorAttachment>>,
+    pub(crate) depth_stencil: Option<(Option<&'a DepthStencilAttachment>, bool)>,
     rasterizer: pso::Rasterizer,
     primitive: Primitive,
     pass: Box<AnyPass<B, T>>,
@@ -53,6 +53,27 @@ where
             primitive: Primitive::TriangleList,
             pass: Box::new(pass),
         }
+    }
+
+    /// Set the input attachment for the given index.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `index`: index into the inner pass required input attachments
+    /// - `input`: the input attachment to use
+    pub fn with_input(mut self, index: usize, input: Attachment<'a>) -> Self {
+        self.set_input(index, input);
+        self
+    }
+
+    /// Set the input attachment for the given index.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `index`: index into the inner pass required input attachments
+    /// - `input`: the input attachment to use
+    pub fn set_input(&mut self, index: usize, input: Attachment<'a>) {
+        self.inputs[index] = Some(input);
     }
 
     /// Set the color attachment for the given index.
