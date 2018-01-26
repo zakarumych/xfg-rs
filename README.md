@@ -1,6 +1,10 @@
-### eXtensible FrameGraph for [`gfx-hal`](https://github.com/gfx-rs/gfx/)
+# eXtensible FrameGraph for [`gfx-hal`](https://github.com/gfx-rs/gfx/)
 
-TODO
+Provides instruments to build complex framegraphs (like those in modern engines) and orchestrate
+command recording and synchronize access to attachments.
+
+User is still responsible to synchronize access to other resources.
+
 ## License
 
 Licensed under either of
