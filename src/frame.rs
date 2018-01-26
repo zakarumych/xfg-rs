@@ -1,10 +1,14 @@
-
 use gfx_hal::Backend;
 use gfx_hal::window::{Backbuffer, Frame};
 
-/// This wrapper allow to abstract over two cases.
-/// `Index` => index to one of multiple `Framebuffer`s created by the engine.
-/// `Buffer` => Single `Framebuffer` associated with `Swapchain`.
+/// This wrapper allows the `Graph` to abstract over two different `FrameBuffer` scenarios.
+///
+/// - `Index`: index to one of multiple `Framebuffer`s created by the graph.
+/// - `Buffer`: single `Framebuffer` associated with the `Swapchain`.
+///
+/// ### Type parameters:
+///
+/// - `B`: hal `Backend`
 #[derive(Derivative)]
 #[derivative(Clone, Debug)]
 pub enum SuperFrame<'a, B: Backend> {
@@ -16,10 +20,10 @@ impl<'a, B> SuperFrame<'a, B>
 where
     B: Backend,
 {
-    /// Create `SuperFrame` from `Backbuffer` and `Frame` index.
+    /// Create a new `SuperFrame` from `Backbuffer` and `Frame` index.
     pub fn new(backbuffer: &'a Backbuffer<B>, frame: Frame) -> Self {
         // Check if we have `Framebuffer` from `Surface` (usually with OpenGL backend) or `Image`s
-        // In case it's `Image`s we need to pick `Framebuffer` for `RenderPass`es
+        // In case it's `Images` we need to pick `Framebuffer` for `RenderPass`es
         // that renders onto surface.
         match *backbuffer {
             Backbuffer::Images(_) => SuperFrame::Index(frame.id()),
@@ -38,8 +42,11 @@ pub enum SuperFramebuffer<B: Backend> {
     External,
 }
 
-/// Picks correct framebuffer
-pub fn pick<'a, B>(framebuffer: &'a SuperFramebuffer<B>, frame: SuperFrame<'a, B>) -> &'a B::Framebuffer
+/// Pick the correct framebuffer
+pub fn pick<'a, B>(
+    framebuffer: &'a SuperFramebuffer<B>,
+    frame: SuperFrame<'a, B>,
+) -> &'a B::Framebuffer
 where
     B: Backend,
 {

@@ -1,33 +1,36 @@
-//! Defines `Pass` trait - main building block for your `Graph`s
-
-mod build;
+//! Defines the `Pass` trait, the main building block of the rendering `Graph`s
 
 pub use self::build::PassBuilder;
 
 use std::fmt::Debug;
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::command::{CommandBuffer, RenderPassInlineEncoder, ClearValue, Rect};
+use gfx_hal::command::{ClearValue, CommandBuffer, Rect, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
-use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet, PipelineStage};
-use gfx_hal::queue::capability::{Supports, Transfer, Graphics};
+use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
+                   PipelineStage};
+use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
 
 use bindings::{Binder, BindingsList, Layout};
 use descriptors::DescriptorPool;
-use frame::{SuperFramebuffer, SuperFrame, pick};
+use frame::{pick, SuperFrame, SuperFramebuffer};
 
-/// Bulding block for `Graph`.
-/// Pass is similar to the concept of `gfx_hal::Backend::RenderPass`.
-/// But several `Pass`'es may be mapped into single `RenderPass` as subpasses.
-/// Pass defines it's inputs and outputs. Also vertex format and bindings.
-/// Drawing methods define how to pick data for drawing and record drawing commands.
-/// `T` is used by `Pass` implementaions however they like.
-/// Note that pass has exclusive access to `T` during preparaion phase.
-/// Which executed secuentially and expected to be fast.
-/// During drawing phase `T` is shared as passes record drawing commands in parallel.
+mod build;
+
+/// `Pass`es are the building blocks a rendering `Graph`.
+///
+/// `Pass` is similar in concept to `gfx_hal::Backend::RenderPass`.
+/// But several `Pass`es may be mapped into a single `RenderPass` as subpasses.
+/// A `Pass` defines its inputs and outputs, and also the required vertex format and bindings.
+///
+/// ### Type parameters:
+///
+/// - `B`: render `Backend`
+/// - `T`: auxiliary data used by the `Pass`, can be anything the `Pass` requires, such as meshes,
+///        caches, etc
 pub trait Pass<B, T>: Debug
 where
     B: Backend,
@@ -44,13 +47,13 @@ where
     /// Number of colors to write
     const COLORS: usize;
 
-    /// Does pass writes into depth buffer?
+    /// Will the pass write to the depth buffer
     const DEPTH: bool;
 
-    /// Does pass uses stencil?
+    /// Will the pass use the stencil buffer
     const STENCIL: bool;
 
-    /// Vertices format
+    /// Vertex formats required by the pass
     const VERTICES: &'static [(&'static [Element<Format>], ElemStride)];
 
     type Bindings: BindingsList;
@@ -68,14 +71,42 @@ where
 
     /// Load shaders
     ///
-    /// This function gets called during `Graph` build process.
+    /// This function gets called during the `Graph` build process, and is expected to load the
+    /// shaders used by the pass.
+    ///
+    /// ### Parameters
+    ///
+    /// - `shaders`: any `ShaderModule` created by the pass should be added here, this is required
+    ///              so the rendering `Graph` can destroy the shader modules after they have been
+    ///              uploaded to the graphics device
+    /// - `device`: graphics device
+    ///
+    /// ### Returns
+    ///
+    /// A set of `EntryPoint`s for the pass shaders.
     fn shaders<'a>(
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
         device: &B::Device,
     ) -> Result<GraphicsShaderSet<'a, B>, ShaderError>;
 
     /// Make preparation for actual drawing commands.
-    /// Bind buffers. Transfer data.
+    ///
+    /// Examples of tasks that should be performed during the preparation phase:
+    ///  - Bind buffers
+    ///  - Transfer data to graphics memory
+    /// Note that pass has exclusive access to `T` during the preparation phase, which is executed
+    /// sequentially and expected to be fast.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `pool`: descriptor pool to use
+    /// - `cbuf`: command buffer to record commands to
+    /// - `device`: graphics device
+    /// - `aux`: auxiliary data
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `C`: Hal `Capability`
     fn prepare<'a, C>(
         &mut self,
         pool: &mut DescriptorPool<B>,
@@ -86,6 +117,16 @@ where
         C: Supports<Transfer>;
 
     /// Record actual drawing commands in inline fashion.
+    ///
+    /// Drawing methods define how to pick data for drawing and record drawing commands.
+    /// During the drawing phase `T` is shared as passes record drawing commands in parallel.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `binder`: binder used to bind bindings to descriptor sets
+    /// - `encoder`: encoder used to record drawing commands
+    /// - `device`: graphics device
+    /// - `aux`: auxiliary data
     fn draw_inline<'a>(
         &mut self,
         binder: Binder<B, Self::Bindings>,
@@ -95,37 +136,49 @@ where
     );
 
     /// Cleanup before dropping this pass
-    fn cleanup(&mut self, _pool: &mut DescriptorPool<B>, _device: &B::Device, _aux: &mut T);
+    ///
+    /// ### Parameters:
+    ///
+    /// - `pool`: descriptor pool used for this pass in the rendering graph
+    /// - `device`: graphics device
+    /// - `aux`: Auxiliary pass data, if the pass have anything stored there that needs to be
+    ///          disposed
+    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T);
 }
 
-/// Object-safe trait that mirrors `Pass` trait.
-/// It's implemented for any type that implements `Pass`.
-pub trait AnyPass<B, T>: Debug
+/// Object-safe trait that mirrors the `Pass` trait.
+/// Is blanket implemented for any type that implements `Pass`.
+pub(crate) trait AnyPass<B, T>: Debug
 where
     B: Backend,
 {
     /// Name of the pass
     fn name(&self) -> &'static str;
 
-    /// Input attachments format
+    /// Input attachments desired format.
+    /// Format of actual attachment may be different.
+    /// It may be larger if another consumer expects larger format.
+    /// It may be smaller because of hardware limitations.
     fn inputs(&self) -> usize;
 
-    /// Colors count
+    /// Number of colors to write
     fn colors(&self) -> usize;
 
-    /// Uses depth?
+    /// Will the pass write to the depth buffer
     fn depth(&self) -> bool;
 
-    /// Uses stencil?
+    /// Will the pass use the stencil buffer
     fn stencil(&self) -> bool;
 
-    /// Bindings
+    /// Bindings for the descriptor sets used by the pass
     fn bindings(&self) -> SmallVec<[DescriptorSetLayoutBinding; 64]>;
 
-    /// Vertices format
+    /// Vertex formats required by the pass
     fn vertices(&self) -> &'static [(&'static [Element<Format>], ElemStride)];
 
-    /// Load shaders
+    /// Reflects [`Pass::shaders`] function
+    ///
+    /// [`Pass::shaders`]: trait.Pass.html#tymethod.shaders
     fn shaders<'a>(
         &self,
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
@@ -154,6 +207,9 @@ where
         aux: &T,
     );
 
+    /// Reflects [`Pass::cleanup`] function
+    ///
+    /// [`Pass::cleanup`]: trait.Pass.html#tymethod.cleanup
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T);
 }
 
@@ -213,13 +269,7 @@ where
         device: &B::Device,
         aux: &mut T,
     ) {
-        P::prepare(
-            self,
-            pool,
-            cbuf,
-            device,
-            aux,
-        );
+        P::prepare(self, pool, cbuf, device, aux);
     }
 
     fn draw_inline<'a>(
@@ -230,13 +280,7 @@ where
         aux: &T,
     ) {
         let binder = Binder::<B, P::Bindings>::new(layout, P::layout(Layout::new()));
-        P::draw_inline(
-            self,
-            binder,
-            encoder,
-            device,
-            aux,
-        );
+        P::draw_inline(self, binder, encoder, device, aux);
     }
 
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T) {
@@ -244,12 +288,16 @@ where
     }
 }
 
-
-/// Single node in rendering graph.
-/// Nodes can use output of other nodes as input.
-/// Such connection called `dependency`
+/// Single node in the rendering graph.
+/// Nodes can use output of other nodes as input, such a connection is called a `dependency`.
+///
+/// ### Type parameters:
+///
+/// - `B`: render `Backend`
+/// - `T`: auxiliary data used by the `Pass`, can be anything the `Pass` requires, such as meshes,
+///        caches, etc
 #[derive(Debug)]
-pub struct PassNode<B: Backend, T> {
+pub(crate) struct PassNode<B: Backend, T> {
     clears: Vec<ClearValue>,
     descriptors: DescriptorPool<B>,
     pipeline_layout: B::PipelineLayout,
@@ -264,38 +312,46 @@ impl<B, T> PassNode<B, T>
 where
     B: Backend,
 {
-    /// Prepares to record actual drawing command.
-    /// This is called outside of renderpass. And has exclusive acces for `T`.
-    /// `PassNode::prepare` function is called sequentially for all passes.
-    /// Thus it is required to be fast.
-    /// 
-    /// `cbuf` - command buffer to record transfer commands.
-    /// `device` - to do stuff.
-    /// `aux` - auxiliary data for passes.
-    pub fn prepare<C>(
-        &mut self,
-        cbuf: &mut CommandBuffer<B, C>,
-        device: &B::Device,
-        aux: &mut T,
-    ) where
+    /// Prepares to record actual drawing commands.
+    /// This is called outside of renderpass, and has exclusive access to `T`.
+    /// `PassNode::prepare` function is called sequentially for all passes, and is expected to be
+    /// fast.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `cbuf`: command buffer to record transfer commands to
+    /// - `device`: graphics device
+    /// - `aux`: auxiliary data for the inner `Pass`
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `C`: hal `Capability`
+    pub fn prepare<C>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, aux: &mut T)
+    where
         C: Supports<Transfer>,
     {
         // Run custom preparation
         // * Write descriptor sets
         // * Store caches
         // * Bind pipeline layout with descriptors sets
-        self.pass.prepare(&mut self.descriptors, cbuf.downgrade(), device, aux);
+        self.pass
+            .prepare(&mut self.descriptors, cbuf.downgrade(), device, aux);
     }
 
     /// Binds pipeline and renderpass to the command buffer `cbuf`.
-    /// Executes `Pass::prepare` and `Pass::draw_inline` of the inner `Pass`
-    /// to record transfer and draw commands.
+    /// Executes `Pass::draw_inline` of the inner `Pass` to record commands.
     ///
-    /// `cbuf` - command buffer to record drawing commands.
-    /// `rect` - area to draw in.
-    /// `frame` - specifies which framebuffer and descriptor sets to use.
-    /// `device` - to do stuff.
-    /// `aux` - auxiliary data for passes.
+    /// ### Parameters:
+    ///
+    /// - `cbuf`: command buffer to record commands to
+    /// - `rect`: area to draw in
+    /// - `frame`: specifies which framebuffer and descriptor sets to use
+    /// - `device`: graphics device
+    /// - `aux`: auxiliary data for the inner `Pass`
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `C`: hal `Capability`
     pub fn draw_inline<C>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
@@ -320,14 +376,19 @@ where
         };
 
         // Record custom drawing calls
-        self.pass.draw_inline(
-            &self.pipeline_layout,
-            encoder,
-            device,
-            aux,
-        );
+        self.pass
+            .draw_inline(&self.pipeline_layout, encoder, device, aux);
     }
 
+    /// Dispose of all internal data created by the pass.
+    ///
+    /// Will call [`Pass::cleanup`], and destroy any locally created framebuffers, renderpasses,
+    /// layouts, pipelines etc
+    ///
+    /// ### Parameters:
+    ///
+    /// - `device`: graphics device
+    /// - `aux`: auxiliary data for the inner `Pass`
     pub fn dispose(mut self, device: &B::Device, aux: &mut T) {
         self.pass.cleanup(&mut self.descriptors, device, aux);
         match self.framebuffer {
