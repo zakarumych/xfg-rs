@@ -46,15 +46,11 @@ where
     /// - `device`: graphics device
     pub fn dispose(self, device: &B::Device) {
         assert_eq!(self.count, self.sets.len());
-        #[cfg(feature = "gfx-metal")]
-        {
-            if device.downcast_ref::<::metal::Device>().is_none() {
-                for pool in self.pools {
-                    pool.reset();
-                }
-            }
-        }
         drop(self.sets);
+        // TODO: Uncomment when all backends will support this.
+        // for pool in self.pools {
+        //     pool.reset();
+        // }
         device.destroy_descriptor_set_layout(self.layout);
     }
 
