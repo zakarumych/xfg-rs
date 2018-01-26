@@ -70,7 +70,7 @@ where
     /// - `device`: graphics device
     pub fn allocate(&mut self, device: &B::Device) -> B::DescriptorSet {
         if self.sets.is_empty() {
-            // Check if there is sets available
+            // Check if there are sets available
             if self.count == self.pools.len() * CAPACITY {
                 // Allocate new pool
                 self.pools
