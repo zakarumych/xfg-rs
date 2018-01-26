@@ -1,4 +1,3 @@
-
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearValue};
 use gfx_hal::device::Extent;
@@ -9,14 +8,19 @@ use gfx_hal::pso;
 
 use smallvec::SmallVec;
 
-use attachment::{Attachment, ColorAttachment, DepthStencilAttachment, AttachmentImageViews, ColorAttachmentDesc, DepthStencilAttachmentDesc, InputAttachmentDesc};
+use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachmentDesc,
+                 DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
 use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
 use graph::GraphBuildError;
 use pass::{AnyPass, Pass, PassNode};
 
-
-/// Collection of data required to construct rendering pass
+/// Collection of data required to construct the node in the rendering `Graph` for a single `Pass`
+///
+/// ### Type parameters:
+///
+/// - `B`: hal `Backend`
+/// - `T`: auxiliary data used by the inner `Pass`
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct PassBuilder<'a, B: Backend, T> {
@@ -32,7 +36,7 @@ impl<'a, B, T> PassBuilder<'a, B, T>
 where
     B: Backend,
 {
-    /// Construct `PassBuilder` from `Pass` type.
+    /// Construct a `PassBuilder` using the given `Pass`.
     pub fn new<P>(pass: P) -> Self
     where
         P: Pass<B, T> + Default + 'static,
@@ -51,20 +55,46 @@ where
         }
     }
 
+    /// Set the color attachment for the given index.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `index`: index into the inner pass required color attachments
+    /// - `color`: the color attachment to use
     pub fn with_color(mut self, index: usize, color: &'a ColorAttachment) -> Self {
         self.set_color(index, color);
         self
     }
 
+    /// Set the color attachment for the given index.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `index`: index into the inner pass required color attachments
+    /// - `color`: the color attachment to use
     pub fn set_color(&mut self, index: usize, color: &'a ColorAttachment) {
         self.colors[index] = Some(color);
     }
 
+    /// Set the depth stencil attachment to use for the pass.
+    ///
+    /// Will only be set if the actual `Pass` is configured to use the depth stencil buffer.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `depth_stencil`: depth stencil attachment to use
     pub fn with_depth(mut self, depth_stencil: &'a DepthStencilAttachment) -> Self {
         self.set_depth(depth_stencil);
         self
     }
 
+    /// Set the depth stencil attachment to use for the pass.
+    ///
+    /// Will only be set if the actual `Pass` is configured to use the depth stencil buffer.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `depth_stencil`: depth stencil attachment to use
     pub fn set_depth(&mut self, depth_stencil: &'a DepthStencilAttachment) {
         match self.depth_stencil {
             Some((ref mut attachment, _)) => *attachment = Some(depth_stencil),
@@ -72,7 +102,7 @@ where
         }
     }
 
-    /// Build `PassNode`
+    /// Build the `PassNode` that will be added to the rendering `Graph`.
     pub(crate) fn build<E>(
         self,
         device: &B::Device,
@@ -84,7 +114,10 @@ where
         // Check attachments
         assert_eq!(inputs.len(), self.pass.inputs());
         assert_eq!(colors.len(), self.pass.colors());
-        assert_eq!(depth_stencil.is_some(), (self.pass.depth() || self.pass.stencil()));
+        assert_eq!(
+            depth_stencil.is_some(),
+            (self.pass.depth() || self.pass.stencil())
+        );
 
         assert!(
             inputs.iter().map(|input| Some(input.format)).eq(self.inputs
@@ -340,16 +373,18 @@ where
     }
 }
 
-fn push_vertex_desc<B>(attributes: &[pso::Element<Format>], stride: pso::ElemStride, pipeline_desc: &mut pso::GraphicsPipelineDesc<B>)
-where
+fn push_vertex_desc<B>(
+    attributes: &[pso::Element<Format>],
+    stride: pso::ElemStride,
+    pipeline_desc: &mut pso::GraphicsPipelineDesc<B>,
+) where
     B: Backend,
 {
     let index = pipeline_desc.vertex_buffers.len() as pso::BufferIndex;
 
-    pipeline_desc.vertex_buffers.push(pso::VertexBufferDesc {
-        stride,
-        rate: 0,
-    });
+    pipeline_desc
+        .vertex_buffers
+        .push(pso::VertexBufferDesc { stride, rate: 0 });
 
     let mut location = pipeline_desc
         .attributes

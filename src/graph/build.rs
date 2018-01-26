@@ -1,4 +1,3 @@
-
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::error::Error;
@@ -9,30 +8,37 @@ use std::ptr::eq;
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
 use gfx_hal::format::{AspectFlags, Format, Swizzle};
-use gfx_hal::image::{Kind, AaMode, Level, SubresourceRange, Usage};
+use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
 
-use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachmentDesc, DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
+use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachmentDesc,
+                 DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
 use graph::Graph;
 use pass::{PassBuilder, PassNode};
 
-
+/// Color range for render targets
 pub const COLOR_RANGE: SubresourceRange = SubresourceRange {
     aspects: AspectFlags::COLOR,
     levels: 0..1,
     layers: 0..1,
 };
 
-
+/// Possible errors during graph building
 #[derive(Debug, Clone)]
 pub enum GraphBuildError<E> {
+    /// Framebuffer could not be created
     FramebufferError,
+    /// Shader module creation error
     ShaderError(ShaderError),
+    /// If no presentation render target is set
     PresentationAttachmentNotSet,
+    /// If no backbuffer is set
     BackbufferNotSet,
+    /// Allocation errors as returned by the `allocator` function given to `GraphBuilder::build`
     AllocationError(E),
+    /// Any other errors encountered during graph building
     Other,
 }
 
@@ -67,8 +73,12 @@ where
         match *self {
             GraphBuildError::FramebufferError => fmt.write_str("framebuffer can't be created"),
             GraphBuildError::ShaderError(ref error) => write!(fmt, "{:?}", error),
-            GraphBuildError::PresentationAttachmentNotSet => fmt.write_str("Presentation attachment wasn't set in GraphBuilder"),
-            GraphBuildError::BackbufferNotSet => fmt.write_str("Presentation attachment wasn't set in GraphBuilder"),
+            GraphBuildError::PresentationAttachmentNotSet => {
+                fmt.write_str("Presentation attachment wasn't set in GraphBuilder")
+            }
+            GraphBuildError::BackbufferNotSet => {
+                fmt.write_str("Presentation attachment wasn't set in GraphBuilder")
+            }
             GraphBuildError::AllocationError(ref error) => write!(fmt, "{}", error),
             GraphBuildError::Other => fmt.write_str("Unknown error has occured"),
         }
@@ -91,6 +101,12 @@ where
     }
 }
 
+/// Graph builder
+///
+/// ### Type parameters:
+///
+/// - `B`: render `Backend`
+/// - `T`: auxiliary data used by the `Pass`es in the `Graph`
 pub struct GraphBuilder<'a, B: Backend, T> {
     passes: Vec<PassBuilder<'a, B, T>>,
     present: Option<&'a ColorAttachment>,
@@ -102,6 +118,7 @@ impl<'a, B, T> GraphBuilder<'a, B, T>
 where
     B: Backend,
 {
+    /// Create a new `GraphBuilder`
     pub fn new() -> Self {
         GraphBuilder {
             passes: Vec::new(),
@@ -115,60 +132,105 @@ where
         }
     }
 
+    /// Add a `Pass` to the `Graph`
+    ///
+    /// ### Parameters:
+    ///
+    /// - `pass`: pass builder
     pub fn with_pass(mut self, pass: PassBuilder<'a, B, T>) -> Self {
         self.add_pass(pass);
         self
     }
 
+    /// Add a `Pass` to the `Graph`
+    ///
+    /// ### Parameters:
+    ///
+    /// - `pass`: pass builder
     pub fn add_pass(&mut self, pass: PassBuilder<'a, B, T>) {
         self.passes.push(pass);
     }
 
+    /// Set the extent of the framebuffers
+    ///
+    /// ### Parameters:
+    ///
+    /// - `extent`: hal `Extent`
     pub fn with_extent(mut self, extent: Extent) -> Self {
         self.set_extent(extent);
         self
     }
 
+    /// Set the extent of the framebuffers
+    ///
+    /// ### Parameters:
+    ///
+    /// - `extent`: hal `Extent`
     pub fn set_extent(&mut self, extent: Extent) {
         self.extent = extent;
     }
 
+    /// Set the backbuffer to use
+    ///
+    /// ### Parameters:
+    ///
+    /// - `backbuffer`: hal `Backbuffer`
     pub fn with_backbuffer(mut self, backbuffer: &'a Backbuffer<B>) -> Self {
         self.set_backbuffer(backbuffer);
         self
     }
 
+    /// Set the backbuffer to use
+    ///
+    /// ### Parameters:
+    ///
+    /// - `backbuffer`: hal `Backbuffer`
     pub fn set_backbuffer(&mut self, backbuffer: &'a Backbuffer<B>) {
         self.backbuffer = Some(backbuffer);
     }
 
+    /// Set presentation draw surface
+    ///
+    /// ### Parameters:
+    ///
+    /// - `present`: color attachment to use as presentation draw surface for the `Graph`
     pub fn with_present(mut self, present: &'a ColorAttachment) -> Self {
         self.set_present(present);
         self
     }
 
+    /// Set presentation draw surface
+    ///
+    /// ### Parameters:
+    ///
+    /// - `present`: color attachment to use as presentation draw surface for the `Graph`
     pub fn set_present(&mut self, present: &'a ColorAttachment) {
         self.present = Some(present);
     }
 
-    /// Build rendering graph from `ColorPin`
-    /// for specified `backbuffer`.
+    /// Build rendering graph
+    ///
+    /// ### Parameters:
+    ///
+    /// - `device`: graphics device
+    /// - `allocator`: allocator function used for creating render targets
+    ///
+    /// ### Type parameters:
+    ///
+    /// - `A`: allocator function
+    /// - `I`: render target image type
+    /// - `E`: errors returned by the allocator function
     pub fn build<A, I, E>(
         self,
         device: &B::Device,
         mut allocator: A,
     ) -> Result<Graph<B, I, T>, GraphBuildError<E>>
     where
-        A: FnMut(
-        Kind,
-        Level,
-        Format,
-        Usage,
-        Properties,
-        &B::Device) -> Result<I, E>,
+        A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
         I: Borrow<B::Image>,
     {
-        let present = self.present.ok_or(GraphBuildError::PresentationAttachmentNotSet)?;
+        let present = self.present
+            .ok_or(GraphBuildError::PresentationAttachmentNotSet)?;
         let backbuffer = self.backbuffer.ok_or(GraphBuildError::BackbufferNotSet)?;
         // Create views for backbuffer
         let (mut image_views, frames) = match *backbuffer {
@@ -318,7 +380,8 @@ where
                 }
             });
 
-            let mut node = pass.build(device, &inputs[..], &colors[..], depth_stencil, self.extent)?;
+            let mut node =
+                pass.build(device, &inputs[..], &colors[..], depth_stencil, self.extent)?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -376,7 +439,6 @@ where
         })
     }
 }
-
 
 fn reorder_passes<'a, B, T: 'a>(
     mut unscheduled: Vec<PassBuilder<'a, B, T>>,
@@ -457,33 +519,27 @@ fn create_target<B, A, I, E>(
 ) -> Result<Range<usize>, E>
 where
     B: Backend,
-    A: FnMut(
-        Kind,
-        Level,
-        Format,
-        Usage,
-        Properties,
-        &B::Device) -> Result<I, E>,
+    A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
     I: Borrow<B::Image>,
 {
-    let kind = Kind::D2(
-        extent.width as u16,
-        extent.height as u16,
-        AaMode::Single,
-    );
+    let kind = Kind::D2(extent.width as u16, extent.height as u16, AaMode::Single);
     let start = views.len();
     for _ in 0..frames {
         let image = allocator(
             kind,
             1,
             format,
-            if depth { Usage::DEPTH_STENCIL_ATTACHMENT } else { Usage::COLOR_ATTACHMENT },
+            if depth {
+                Usage::DEPTH_STENCIL_ATTACHMENT
+            } else {
+                Usage::COLOR_ATTACHMENT
+            },
             Properties::DEVICE_LOCAL,
             device,
         )?;
         let view = device
             .create_image_view(image.borrow(), format, Swizzle::NO, COLOR_RANGE.clone())
-            .expect("Views are epxected to be created");
+            .expect("Views are expected to be created");
         views.push(view);
         images.push(image);
     }
@@ -501,12 +557,23 @@ where
     let mut deps = Vec::new();
     for input in &pass.inputs {
         let input = input.unwrap();
-        deps.extend(passes.iter().enumerate().filter(|p| {
-            p.1.depth_stencil
-                .as_ref()
-                .map(|&(a, _)| input.is(Attachment::DepthStencil(a.unwrap())))
-                .unwrap_or(false) || p.1.colors.iter().any(|a| input.is(Attachment::Color(a.unwrap())))
-        }).map(|p| p.0));
+        deps.extend(
+            passes
+                .iter()
+                .enumerate()
+                .filter(|p| {
+                    p.1
+                        .depth_stencil
+                        .as_ref()
+                        .map(|&(a, _)| input.is(Attachment::DepthStencil(a.unwrap())))
+                        .unwrap_or(false)
+                        || p.1
+                            .colors
+                            .iter()
+                            .any(|a| input.is(Attachment::Color(a.unwrap())))
+                })
+                .map(|p| p.0),
+        );
     }
     deps.sort();
     deps.dedup();
@@ -523,19 +590,28 @@ where
 {
     let mut siblings = Vec::new();
     for &color in pass.colors.iter() {
-        siblings.extend(passes.iter().enumerate().filter(|p| {
-            p.1.colors
+        siblings.extend(
+            passes
                 .iter()
-                .any(|a| eq(a.unwrap(), color.unwrap()))
-        }).map(|p| p.0));
+                .enumerate()
+                .filter(|p| p.1.colors.iter().any(|a| eq(a.unwrap(), color.unwrap())))
+                .map(|p| p.0),
+        );
     }
     if let Some((Some(depth), _)) = pass.depth_stencil {
-        siblings.extend(passes.iter().enumerate().filter(|p| {
-            p.1.depth_stencil
-                .as_ref()
-                .map(|&(a, _)| eq(a.unwrap(), depth))
-                .unwrap_or(false)
-        }).map(|p| p.0));
+        siblings.extend(
+            passes
+                .iter()
+                .enumerate()
+                .filter(|p| {
+                    p.1
+                        .depth_stencil
+                        .as_ref()
+                        .map(|&(a, _)| eq(a.unwrap(), depth))
+                        .unwrap_or(false)
+                })
+                .map(|p| p.0),
+        );
     }
     siblings.sort();
     siblings.dedup();
@@ -558,4 +634,3 @@ where
     deps.dedup();
     deps
 }
-
