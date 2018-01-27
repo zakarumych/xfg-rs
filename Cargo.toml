@@ -2,7 +2,7 @@
 name = "xfg"
 version = "0.1.0"
 authors = ["omni-viral <scareaangel@gmail.com>"]
-description = "eXtensible Frame Graph based of gfx."
+description = "eXtensible FrameGraph for `gfx_hal`"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/omni-viral/xfg-rs.git"
 
