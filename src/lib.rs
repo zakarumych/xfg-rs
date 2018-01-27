@@ -1,9 +1,9 @@
 //! eXtensible FrameGraph for `gfx_hal`
 //! 
-//! Provides instruments to build complex framegraphs and orchestrate
+//! Provides instruments for building complex framegraphs that can orchestrate
 //! command recording and synchronize access to attachments.
 //! 
-//! User is still responsible to synchronize access to other resources.
+//! User is still responsible for synchronizing access to other resources.
 //! 
 
 #![deny(dead_code)]

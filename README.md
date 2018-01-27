@@ -1,9 +1,9 @@
 # eXtensible FrameGraph for [`gfx-hal`](https://github.com/gfx-rs/gfx/)
 
-Provides instruments to build complex framegraphs (like those in modern engines) and orchestrate
+Provides instruments for building complex framegraphs (like those in modern engines) that can orchestrate
 command recording and synchronize access to attachments.
 
-User is still responsible to synchronize access to other resources.
+User is still responsible for synchronizing access to other resources.
 
 ## License
 
@@ -15,6 +15,9 @@ Licensed under either of
 at your option.
 
 ### Contribution
+
+We are a community project that welcomes contribution from anyone. If you're interested in helping out, you can contact
+us either through GitHub, or via [`gitter`](https://gitter.im/gfx-rs/gfx).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any
