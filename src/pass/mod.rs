@@ -38,9 +38,9 @@ where
     fn name(&self) -> &str;
 
     /// Input attachments desired format.
-    /// Format of actual attachment may be different.
-    /// It may be larger if another consumer expects larger format.
-    /// It may be smaller because of hardware limitations.
+    ///
+    /// Format of the actual attachment may be different, it may be larger if another consumer
+    /// expects a larger format, or smaller because of hardward limitations.
     fn inputs(&self) -> usize;
 
     /// Number of colors to write
@@ -73,8 +73,9 @@ where
     ///
     /// ### Parameters
     ///
-    /// - `shaders`: `ShaderModule` objects created by the pass can be added here, if they are not stored in the Pass.
-    ///               If they are added here, they will be destroyed by the `Graph` after having been uploaded to the graphics device.
+    /// - `shaders`: `ShaderModule` objects created by the pass can be added here, if they are
+    ///               not stored in the Pass. If they are added here, they will be destroyed by
+    ///               the `Graph` after having been uploaded to the graphics device.
     /// - `device`: graphics device
     ///
     /// ### Returns
@@ -91,8 +92,8 @@ where
     /// Examples of tasks that should be performed during the preparation phase:
     ///  - Bind buffers
     ///  - Transfer data to graphics memory
-    /// Note that pass has exclusive access to `T` during the preparation phase, which is executed
-    /// sequentially and expected to be fast.
+    /// Note that the pass has exclusive access to `T` during the preparation phase, which is
+    /// executed sequentially and expected to be fast.
     ///
     /// ### Parameters:
     ///
