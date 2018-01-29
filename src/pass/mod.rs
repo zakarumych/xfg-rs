@@ -35,35 +35,32 @@ where
     B: Backend,
 {
     /// Name of the pass
-    const NAME: &'static str;
+    fn name(&self) -> &str;
 
     /// Input attachments desired format.
     /// Format of actual attachment may be different.
     /// It may be larger if another consumer expects larger format.
     /// It may be smaller because of hardware limitations.
-    const INPUTS: usize;
+    fn inputs(&self) -> usize;
 
     /// Number of colors to write
-    const COLORS: usize;
+    fn colors(&self) -> usize;
 
     /// Will the pass write to the depth buffer
-    const DEPTH: bool;
+    fn depth(&self) -> bool;
 
     /// Will the pass use the stencil buffer
-    const STENCIL: bool;
+    fn stencil(&self) -> bool;
 
     /// Vertex formats required by the pass
-    const VERTICES: &'static [(&'static [Element<Format>], ElemStride)];
+    fn vertices(&self) -> &[(&[Element<Format>], ElemStride)];
 
     /// Bindings for the descriptor sets used by the pass
-    const BINDINGS: &'static [DescriptorSetLayoutBinding];
+    fn bindings(&self) -> &[DescriptorSetLayoutBinding];
 
     /// Build render pass
-    fn build() -> PassBuilder<'static, B, T>
-    where
-        Self: 'static + Default,
-    {
-        PassBuilder::new(Self::default())
+    fn build<'a>(self) -> PassBuilder<'static, B, T> where Self: Sized + 'static {
+        PassBuilder::new(self)
     }
 
     /// Load shaders
@@ -73,15 +70,15 @@ where
     ///
     /// ### Parameters
     ///
-    /// - `shaders`: any `ShaderModule` created by the pass should be added here, this is required
-    ///              so the rendering `Graph` can destroy the shader modules after they have been
-    ///              uploaded to the graphics device
+    /// - `shaders`: `ShaderModule`s created by the pass can be added here.
+    ///              In case `Pass` doesn't store them.
     /// - `device`: graphics device
     ///
     /// ### Returns
     ///
     /// A set of `EntryPoint`s for the pass shaders.
     fn shaders<'a>(
+        &'a self,
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
         device: &B::Device,
     ) -> Result<GraphicsShaderSet<'a, B>, ShaderError>;
@@ -104,14 +101,13 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: Hal `Capability`
-    fn prepare<'a, C>(
+    fn prepare<'a>(
         &mut self,
         pool: &mut DescriptorPool<B>,
-        cbuf: &mut CommandBuffer<B, C>,
+        cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
         aux: &mut T,
-    ) where
-        C: Supports<Transfer>;
+    );
 
     /// Record actual drawing commands in inline fashion.
     ///
@@ -143,147 +139,6 @@ where
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T);
 }
 
-/// Object-safe trait that mirrors the `Pass` trait.
-/// Is blanket implemented for any type that implements `Pass`.
-pub(crate) trait AnyPass<B, T>: Debug
-where
-    B: Backend,
-{
-    /// Name of the pass
-    fn name(&self) -> &'static str;
-
-    /// Input attachments desired format.
-    /// Format of actual attachment may be different.
-    /// It may be larger if another consumer expects larger format.
-    /// It may be smaller because of hardware limitations.
-    fn inputs(&self) -> usize;
-
-    /// Number of colors to write
-    fn colors(&self) -> usize;
-
-    /// Will the pass write to the depth buffer
-    fn depth(&self) -> bool;
-
-    /// Will the pass use the stencil buffer
-    fn stencil(&self) -> bool;
-
-    /// Bindings for the descriptor sets used by the pass
-    fn bindings(&self) -> &'static [DescriptorSetLayoutBinding];
-
-    /// Vertex formats required by the pass
-    fn vertices(&self) -> &'static [(&'static [Element<Format>], ElemStride)];
-
-    /// Reflects [`Pass::shaders`] function
-    ///
-    /// [`Pass::shaders`]: trait.Pass.html#tymethod.shaders
-    fn shaders<'a>(
-        &self,
-        shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
-        device: &B::Device,
-    ) -> Result<GraphicsShaderSet<'a, B>, ShaderError>;
-
-    /// Reflects [`Pass::prepare`] function
-    ///
-    /// [`Pass::prepare`]: trait.Pass.html#tymethod.prepare
-    fn prepare(
-        &mut self,
-        pool: &mut DescriptorPool<B>,
-        cbuf: &mut CommandBuffer<B, Transfer>,
-        device: &B::Device,
-        aux: &mut T,
-    );
-
-    /// Reflects [`Pass::draw_inline`] function
-    ///
-    /// [`Pass::draw_inline`]: trait.Pass.html#tymethod.draw_inline
-    fn draw_inline(
-        &mut self,
-        layout: &B::PipelineLayout,
-        encoder: RenderPassInlineEncoder<B>,
-        device: &B::Device,
-        aux: &T,
-    );
-
-    /// Reflects [`Pass::cleanup`] function
-    ///
-    /// [`Pass::cleanup`]: trait.Pass.html#tymethod.cleanup
-    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T);
-}
-
-impl<P, B, T> AnyPass<B, T> for P
-where
-    P: Pass<B, T> + 'static,
-    B: Backend,
-{
-    /// Name of the pass
-    fn name(&self) -> &'static str {
-        P::NAME
-    }
-
-    /// Input attachments format
-    fn inputs(&self) -> usize {
-        P::INPUTS
-    }
-
-    /// Colors count
-    fn colors(&self) -> usize {
-        P::COLORS
-    }
-
-    /// Uses depth?
-    fn depth(&self) -> bool {
-        P::DEPTH
-    }
-
-    /// Uses stencil?
-    fn stencil(&self) -> bool {
-        P::STENCIL
-    }
-
-    /// Bindings
-    fn bindings(&self) -> &'static [DescriptorSetLayoutBinding] {
-        P::BINDINGS
-    }
-
-    /// Vertices format
-    fn vertices(&self) -> &'static [(&'static [Element<Format>], ElemStride)] {
-        P::VERTICES
-    }
-
-    /// Load shaders
-    fn shaders<'a>(
-        &self,
-        shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
-        device: &B::Device,
-    ) -> Result<GraphicsShaderSet<'a, B>, ShaderError> {
-        P::shaders(shaders, device)
-    }
-
-    fn prepare(
-        &mut self,
-        pool: &mut DescriptorPool<B>,
-        cbuf: &mut CommandBuffer<B, Transfer>,
-        device: &B::Device,
-        aux: &mut T,
-    ) {
-        P::prepare(self, pool, cbuf, device, aux);
-    }
-
-    fn draw_inline<'a>(
-        &mut self,
-        layout: &B::PipelineLayout,
-        encoder: RenderPassInlineEncoder<B>,
-        device: &B::Device,
-        aux: &T,
-    ) {
-        P::draw_inline(self, layout, encoder, device, aux);
-    }
-
-    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T) {
-        P::cleanup(self, pool, device, aux);
-    }
-}
-
 /// Single node in the rendering graph.
 /// Nodes can use output of other nodes as input, such a connection is called a `dependency`.
 ///
@@ -300,7 +155,7 @@ pub(crate) struct PassNode<B: Backend, T> {
     graphics_pipeline: B::GraphicsPipeline,
     render_pass: B::RenderPass,
     framebuffer: SuperFramebuffer<B>,
-    pass: Box<AnyPass<B, T>>,
+    pass: Box<Pass<B, T>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
 }
 

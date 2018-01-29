@@ -13,7 +13,7 @@ use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachm
 use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
 use graph::GraphBuildError;
-use pass::{AnyPass, Pass, PassNode};
+use pass::{Pass, PassNode};
 
 /// Collection of data required to construct the node in the rendering `Graph` for a single `Pass`
 ///
@@ -29,7 +29,7 @@ pub struct PassBuilder<'a, B: Backend, T> {
     pub(crate) depth_stencil: Option<(Option<&'a DepthStencilAttachment>, bool)>,
     rasterizer: pso::Rasterizer,
     primitive: Primitive,
-    pass: Box<AnyPass<B, T>>,
+    pass: Box<Pass<B, T>>,
 }
 
 impl<'a, B, T> PassBuilder<'a, B, T>
@@ -39,13 +39,13 @@ where
     /// Construct a `PassBuilder` using the given `Pass`.
     pub fn new<P>(pass: P) -> Self
     where
-        P: Pass<B, T> + Default + 'static,
+        P: Pass<B, T> + 'static,
     {
         PassBuilder {
-            inputs: vec![None; P::INPUTS],
-            colors: vec![None; P::COLORS],
-            depth_stencil: if P::DEPTH {
-                Some((None, P::STENCIL))
+            inputs: vec![None; pass.inputs()],
+            colors: vec![None; pass.colors()],
+            depth_stencil: if pass.depth() {
+                Some((None, pass.stencil()))
             } else {
                 None
             },
