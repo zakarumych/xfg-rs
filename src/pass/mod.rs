@@ -73,8 +73,8 @@ where
     ///
     /// ### Parameters
     ///
-    /// - `shaders`: `ShaderModule`s created by the pass can be added here.
-    ///              In case `Pass` doesn't store them.
+    /// - `shaders`: `ShaderModule` objects created by the pass can be added here, if they are not stored in the Pass.
+    ///               If they are added here, they will be destroyed by the `Graph` after having been uploaded to the graphics device.
     /// - `device`: graphics device
     ///
     /// ### Returns
