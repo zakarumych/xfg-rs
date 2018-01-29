@@ -59,7 +59,10 @@ where
     fn bindings(&self) -> &[DescriptorSetLayoutBinding];
 
     /// Build render pass
-    fn build<'a>(self) -> PassBuilder<'static, B, T> where Self: Sized + 'static {
+    fn build<'a>(self) -> PassBuilder<'static, B, T>
+    where
+        Self: Sized + 'static,
+    {
         PassBuilder::new(self)
     }
 
