@@ -472,7 +472,6 @@ where
         // Store
         scheduled.push(unscheduled.swap_remove(index));
         deps.push(last_dep);
-        unscheduled.swap_remove(index);
     }
     (scheduled, deps)
 }
