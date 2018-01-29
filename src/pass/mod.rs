@@ -5,7 +5,7 @@ pub use self::build::PassBuilder;
 use std::fmt::Debug;
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::command::{ClearValue, CommandBuffer, Rect, RenderPassInlineEncoder};
+use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
@@ -126,7 +126,7 @@ where
     fn draw_inline<'a>(
         &mut self,
         layout: &B::PipelineLayout,
-        encoder: RenderPassInlineEncoder<B>,
+        encoder: RenderPassInlineEncoder<B, Primary>,
         device: &B::Device,
         aux: &T,
     );

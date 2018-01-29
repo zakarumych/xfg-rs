@@ -10,7 +10,7 @@
 pub use self::build::{GraphBuildError, GraphBuilder};
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::command::Viewport;
+use gfx_hal::command::{OneShot, Viewport};
 use gfx_hal::pool::CommandPool;
 use gfx_hal::pso::PipelineStage;
 use gfx_hal::queue::CommandQueue;
@@ -103,7 +103,7 @@ where
         // Record commands for all passes
         self.passes.iter_mut().enumerate().for_each(|(id, pass)| {
             // Pick buffer
-            let mut cbuf = pool.acquire_command_buffer();
+            let mut cbuf = pool.acquire_command_buffer::<OneShot>(false);
 
             // Setup
             cbuf.set_viewports(&[viewport.clone()]);
@@ -145,7 +145,7 @@ where
                 queue.submit(
                     Submission::new()
                         .promote::<C>()
-                        .submit(&[cbuf.finish()])
+                        .submit(Some(cbuf.finish()))
                         .wait_on(&to_wait)
                         .signal(&to_signal),
                     fence,
