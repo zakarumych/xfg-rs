@@ -1,4 +1,9 @@
 
+
+// #![deny(dead_code)]
+// #![deny(unused_imports)]
+#![deny(unused_must_use)]
+
 extern crate cgmath;
 extern crate env_logger;
 extern crate gfx_hal;
@@ -407,6 +412,9 @@ fn main() {
 
     env_logger::init();
 
+    #[cfg(feature = "metal")]
+    let mut autorelease_pool = unsafe { back::AutoreleasePool::new() };
+
     let mut events_loop = EventsLoop::new();
 
     let wb = WindowBuilder::new()
@@ -488,6 +496,7 @@ fn main() {
             .with_backbuffer(&backbuffer)
             .with_present(&present)
             .build(&device, |kind, level, format, usage, properties, device| {
+                println!("Create image");
                 allocator.create_image(device, (Type::General, properties), kind, level, format, usage)
             }).unwrap()
     };
@@ -548,18 +557,23 @@ fn main() {
             &mut scene,
         );
 
-        println!("Present frame");
-        swap_chain.present(&mut command_queue, Some(&release));
-
         println!("Wait for idle");
         if !device.wait_for_fences(&[&finish], WaitFor::All, 1000) {
             panic!("Failed to wait for drawing in 1 sec");
         }
 
+        println!("Present frame");
+        swap_chain.present(&mut command_queue, &[]);
+
         device.reset_fences(&[&finish]);
 
         println!("Reset pool");
         command_pool.reset();
+
+        #[cfg(feature = "metal")]
+        unsafe {
+            autorelease_pool.reset();
+        }
     }
 
     println!("FINISH");

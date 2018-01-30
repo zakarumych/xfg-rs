@@ -131,8 +131,7 @@ where
 
                 let mut to_signal = SmallVec::<[_; 1]>::new();
                 if id == count - 1 {
-                    // The last one has to draw to surface.
-                    // Also it depends on all others that draws to surface.
+                    // TODO: Find the last one that draws on to surface.
                     to_signal.push(release);
                 } else if let Some(signal) = signals[id].as_ref() {
                     to_signal.push(signal);
