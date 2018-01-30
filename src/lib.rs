@@ -19,6 +19,7 @@ extern crate smallvec;
 
 pub use attachment::{Attachment, ColorAttachment, DepthStencilAttachment};
 pub use descriptors::DescriptorPool;
+pub use frame::SuperFrame;
 pub use graph::{Graph, GraphBuildError, GraphBuilder};
 pub use pass::{Pass, PassBuilder};
 

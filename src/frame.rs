@@ -3,16 +3,15 @@ use gfx_hal::window::{Backbuffer, Frame};
 
 /// This wrapper allows the `Graph` to abstract over two different `FrameBuffer` scenarios.
 ///
-/// - `Index`: index to one of multiple `Framebuffer`s created by the graph.
-/// - `Buffer`: single `Framebuffer` associated with the `Swapchain`.
-///
 /// ### Type parameters:
 ///
 /// - `B`: hal `Backend`
 #[derive(Derivative)]
 #[derivative(Clone, Debug)]
 pub enum SuperFrame<'a, B: Backend> {
+    /// Index to one of multiple `Framebuffer`s created by the graph.
     Index(usize),
+    /// Single `Framebuffer` associated with the `Swapchain`.
     Buffer(&'a B::Framebuffer),
 }
 
