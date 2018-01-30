@@ -8,12 +8,9 @@ repository = "https://github.com/omni-viral/xfg-rs.git"
 
 [dependencies]
 derivative = "1.0"
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
+gfx-hal = { version = "0.1.0", path = "/Users/zakarum/pet/gfx/src/hal" }
 relevant = "0.1"
 smallvec = "0.4"
 
-[dev-dependencies]
-cgmath = "0.16"
-gfx_mem = { version = "0.0.0", git = "https://github.com/omni-viral/gfx_mem.git", branch = "impl" }
-gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git" }
-winit = "0.10"
+[workspace]
+members = ["examples"]

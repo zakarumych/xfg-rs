@@ -1,0 +1,28 @@
+[package]
+name = "xfg-examples"
+version = "0.1.0"
+authors = ["omni-viral <scareaangel@gmail.com>"]
+repository = "https://github.com/omni-viral/xfg-rs.git"
+
+[dependencies]
+cgmath = "0.16"
+env_logger = "0.5"
+gfx_mem = { version = "0.1.0", path = "/Users/zakarum/pet/gfx_mem" }
+gfx-hal = { version = "0.1.0", path = "/Users/zakarum/pet/gfx/src/hal" }
+gfx-backend-dx12 = { path = "/Users/zakarum/pet/gfx/src/backend/dx12", optional = true }
+gfx-backend-gl = { path = "/Users/zakarum/pet/gfx/src/backend/gl", optional = true }
+gfx-backend-metal = { path = "/Users/zakarum/pet/gfx/src/backend/metal", optional = true }
+gfx-backend-vulkan = { path = "/Users/zakarum/pet/gfx/src/backend/vulkan", optional = true }
+xfg = { path = ".." }
+smallvec = "0.4"
+winit = "0.10"
+
+[features]
+metal = ["gfx-backend-metal"]
+gl = ["gfx-backend-gl"]
+dx12 = ["gfx-backend-dx12"]
+vulkan = ["gfx-backend-vulkan"]
+
+[[bin]]
+name = "flat"
+path = "flat/main.rs"

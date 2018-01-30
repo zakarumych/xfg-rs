@@ -1,8 +1,8 @@
 
 extern crate cgmath;
+extern crate env_logger;
 extern crate gfx_hal;
 extern crate gfx_mem;
-extern crate gfx_backend_gl;
 extern crate smallvec;
 extern crate winit;
 extern crate xfg;
@@ -79,7 +79,7 @@ where
     fn colors(&self) -> usize { 1 }
 
     /// Uses depth attachment
-    fn depth(&self) -> bool { false }
+    fn depth(&self) -> bool { true }
 
     /// Uses stencil attachment
     fn stencil(&self) -> bool { false }
@@ -94,7 +94,7 @@ where
                         offset: 0,
                     },
                     Element {
-                        format: Format::Rgba8Unorm,
+                        format: Format::Rgba32Float,
                         offset: 12,
                     },
                 ],
@@ -108,7 +108,7 @@ where
             DescriptorSetLayoutBinding {
                 binding: 0,
                 ty: DescriptorType::UniformBuffer,
-                count: 0,
+                count: 1,
                 stage_flags: ShaderStageFlags::VERTEX,
             }
         ]
@@ -331,7 +331,9 @@ where
 
     let buffer = factory.create_buffer(device, REQUEST_CPU_VISIBLE, pos_color.len() as u64, Usage::VERTEX).unwrap();
     {
-        let mut writer = device.acquire_mapping_writer(buffer.memory(), buffer.range()).unwrap();
+        let start = buffer.range().start;
+        let end = start + pos_color.len() as u64;
+        let mut writer = device.acquire_mapping_writer(buffer.memory(), start .. end).unwrap();
         writer.copy_from_slice(pos_color);
         device.release_mapping_writer(writer);
     }
@@ -382,36 +384,59 @@ where
 }
 
 fn main() {
-    use gfx_backend_gl as gl;
+    #[cfg(feature = "dx12")]
+    extern crate gfx_backend_dx12 as back;
+    #[cfg(feature = "metal")]
+    extern crate gfx_backend_metal as back;
+    #[cfg(feature = "gl")]
+    extern crate gfx_backend_gl as back;
+    #[cfg(feature = "vulkan")]
+    extern crate gfx_backend_vulkan as back;
+
     use gfx_hal::{Instance, PhysicalDevice, Surface};
-    use gfx_hal::command::{ClearColor, ClearDepthStencil};
-    use gfx_hal::device::Extent;
+    use gfx_hal::command::{ClearColor, ClearDepthStencil, Rect, Viewport};
+    use gfx_hal::device::{Extent, WaitFor};
     use gfx_hal::format::ChannelType;
     use gfx_hal::pool::CommandPoolCreateFlags;
     use gfx_hal::queue::Graphics;
-    use gfx_hal::window::SwapchainConfig;
+    use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
 
     use winit::{EventsLoop, WindowBuilder};
 
-    use xfg::{ColorAttachment, DepthStencilAttachment, GraphBuilder};
+    use xfg::{ColorAttachment, DepthStencilAttachment, SuperFrame, GraphBuilder};
+
+    env_logger::init();
 
     let mut events_loop = EventsLoop::new();
 
     let wb = WindowBuilder::new()
-        .with_dimensions(1024, 1024)
+        .with_dimensions(480, 480)
         .with_title("flat".to_string());
 
+    #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+    let window = wb
+        .build(&events_loop)
+        .unwrap();
+    #[cfg(feature = "gl")]
     let window = {
-        let builder = gl::config_context(
-            gl::glutin::ContextBuilder::new(),
+        let builder = back::config_context(
+            back::glutin::ContextBuilder::new(),
             Format::Rgba8Srgb,
             None,
         ).with_vsync(true);
-        gl::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
+        back::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
     };
-
+    
+    #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+    let (_instance, mut adapter, mut surface) = {
+        let instance = back::Instance::create("gfx-rs quad", 1);
+        let surface = instance.create_surface(&window);
+        let mut adapters = instance.enumerate_adapters();
+        (instance, adapters.remove(0), surface)
+    };
+    #[cfg(feature = "gl")]
     let (mut adapter, mut surface) = {
-        let surface = gl::Surface::from_window(window);
+        let surface = back::Surface::from_window(window);
         let mut adapters = surface.enumerate_adapters();
         (adapters.remove(0), surface)
     };
@@ -435,7 +460,7 @@ fn main() {
         .physical_device
         .memory_properties();
 
-    let mut allocator = SmartAllocator::<gl::Backend>::new(memory_properties, 32, 32, 32, 1024 * 1024 * 64);
+    let mut allocator = SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 480 * 480 * 64);
 
     let (device, mut queue_group) =
         adapter.open_with::<_, Graphics>(1, |family| {
@@ -443,22 +468,23 @@ fn main() {
         }).unwrap();
 
     let mut command_pool = device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16);
-    let mut queue = &mut queue_group.queues[0];
+    let mut command_queue = &mut queue_group.queues[0];
 
     let swap_config = SwapchainConfig::new()
-        .with_color(surface_format);
+        .with_color(surface_format)
+        .with_image_count(1);
     let (mut swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
 
-    let graph = {
-        // let depth = DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0));
+    let mut graph = {
+        let depth = DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0));
         let present = ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.3, 0.4, 0.5, 1.0]));
         let pass = DrawFlat.build()
             .with_color(0, &present)
-            // .with_depth(&depth)
+            .with_depth(&depth)
             ;
         GraphBuilder::new()
             .with_pass(pass)
-            .with_extent(Extent { width: 100, height: 100, depth: 100 })
+            .with_extent(Extent { width: 480, height: 480, depth: 1 })
             .with_backbuffer(&backbuffer)
             .with_present(&present)
             .build(&device, |kind, level, format, usage, properties, device| {
@@ -478,7 +504,7 @@ fn main() {
     }.into();
 
     let mut scene = Scene {
-        objects: vec![create_cube(&device, &mut allocator, Matrix4::identity())],
+        objects: vec![], //vec![create_cube(&device, &mut allocator, Matrix4::identity())],
         camera: Camera {
             view,
             proj,
@@ -486,5 +512,56 @@ fn main() {
         allocator,
     };
 
+    let acquire = device.create_semaphore();
+    let release = device.create_semaphore();
+    let finish = device.create_fence(false);
+
+    for i in 0 .. 10 {
+        println!("Iteration: {}", i);
+        println!("Poll events");
+        events_loop.poll_events(|_| ());
+
+        println!("Sleep a bit");
+        ::std::thread::sleep(::std::time::Duration::from_millis(1000));
+
+        println!("Acquire frame");
+        let frame = SuperFrame::new(&backbuffer, swap_chain.acquire_frame(FrameSync::Semaphore(&acquire)));
+
+        println!("Draw inline");
+        graph.draw_inline(
+            &mut command_queue,
+            &mut command_pool,
+            frame,
+            &acquire,
+            &release,
+            Viewport {
+                rect: Rect {
+                    x: 0,
+                    y: 0,
+                    w: 480,
+                    h: 480,
+                },
+                depth: 0.0 .. 1.0,
+            },
+            &finish,
+            &device,
+            &mut scene,
+        );
+
+        println!("Present frame");
+        swap_chain.present(&mut command_queue, Some(&release));
+
+        println!("Wait for idle");
+        if !device.wait_for_fences(&[&finish], WaitFor::All, 1000) {
+            panic!("Failed to wait for drawing in 1 sec");
+        }
+
+        device.reset_fences(&[&finish]);
+
+        println!("Reset pool");
+        command_pool.reset();
+    }
+
+    println!("FINISH");
     ::std::process::exit(0);
 }
