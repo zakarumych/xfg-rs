@@ -1,7 +1,7 @@
 
 
-// #![deny(dead_code)]
-// #![deny(unused_imports)]
+#![deny(dead_code)]
+#![deny(unused_imports)]
 #![deny(unused_must_use)]
 
 extern crate cgmath;
@@ -436,14 +436,14 @@ fn main() {
     };
     
     #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
-    let (_instance, mut adapter, mut surface) = {
+    let (_instance, adapter, mut surface) = {
         let instance = back::Instance::create("gfx-rs quad", 1);
         let surface = instance.create_surface(&window);
         let mut adapters = instance.enumerate_adapters();
         (instance, adapters.remove(0), surface)
     };
     #[cfg(feature = "gl")]
-    let (mut adapter, mut surface) = {
+    let (adapter, mut surface) = {
         let surface = back::Surface::from_window(window);
         let mut adapters = surface.enumerate_adapters();
         (adapters.remove(0), surface)
@@ -475,12 +475,12 @@ fn main() {
             surface.supports_queue_family(family)
         }).unwrap();
 
-    let mut command_pool = device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16);
+    let mut command_pool = (0..3).map(|_| device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)).collect::<Vec<_>>();
     let mut command_queue = &mut queue_group.queues[0];
 
     let swap_config = SwapchainConfig::new()
         .with_color(surface_format)
-        .with_image_count(1);
+        .with_image_count(3);
     let (mut swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
 
     let mut graph = {
@@ -496,7 +496,7 @@ fn main() {
             .with_backbuffer(&backbuffer)
             .with_present(&present)
             .build(&device, |kind, level, format, usage, properties, device| {
-                println!("Create image");
+                // println!("Create image");
                 allocator.create_image(device, (Type::General, properties), kind, level, format, usage)
             }).unwrap()
     };
@@ -513,7 +513,7 @@ fn main() {
     }.into();
 
     let mut scene = Scene {
-        objects: vec![], //vec![create_cube(&device, &mut allocator, Matrix4::identity())],
+        objects: vec![create_cube(&device, &mut allocator, Matrix4::identity())],
         camera: Camera {
             view,
             proj,
@@ -521,28 +521,47 @@ fn main() {
         allocator,
     };
 
-    let acquire = device.create_semaphore();
-    let release = device.create_semaphore();
-    let finish = device.create_fence(false);
+    let acquire = (0..3).map(|_| device.create_semaphore()).collect::<Vec<_>>();
+    let release = (0..3).map(|_| device.create_semaphore()).collect::<Vec<_>>();
+    let finish = (0..3).map(|_| device.create_fence(true)).collect::<Vec<_>>();
 
-    for i in 0 .. 10 {
-        println!("Iteration: {}", i);
-        println!("Poll events");
+    let start = ::std::time::Instant::now();
+    let total = 100000;
+    for i in 0 .. total {
+        // println!("Iteration: {}", i);
+        // println!("Poll events");
         events_loop.poll_events(|_| ());
 
-        println!("Sleep a bit");
-        ::std::thread::sleep(::std::time::Duration::from_millis(1000));
+        // println!("Sleep a bit");
+        // ::std::thread::sleep(::std::time::Duration::from_millis(100));
 
-        println!("Acquire frame");
-        let frame = SuperFrame::new(&backbuffer, swap_chain.acquire_frame(FrameSync::Semaphore(&acquire)));
+        // println!("Wait for idle");
+        if !device.wait_for_fences(&[&finish[i % 3]], WaitFor::All, !0) {
+            panic!("Failed to wait for drawing");
+        }
 
-        println!("Draw inline");
+        // println!("Acquire frame");
+        let frame = swap_chain.acquire_frame(FrameSync::Semaphore(&acquire[i % 3]));
+        assert_eq!(i % 3, frame.id());
+
+        device.reset_fences(&[&finish[i % 3]]);
+
+        // println!("Reset pool");
+        command_pool[i % 3].reset();
+
+        #[cfg(feature = "metal")]
+        unsafe {
+            autorelease_pool.reset();
+        }
+        let frame = SuperFrame::new(&backbuffer, frame);
+
+        // println!("Draw inline");
         graph.draw_inline(
             &mut command_queue,
-            &mut command_pool,
+            &mut command_pool[i % 3],
             frame,
-            &acquire,
-            &release,
+            &acquire[i % 3],
+            &release[i % 3],
             Viewport {
                 rect: Rect {
                     x: 0,
@@ -552,30 +571,26 @@ fn main() {
                 },
                 depth: 0.0 .. 1.0,
             },
-            &finish,
+            &finish[i % 3],
             &device,
             &mut scene,
         );
 
-        println!("Wait for idle");
-        if !device.wait_for_fences(&[&finish], WaitFor::All, 1000) {
-            panic!("Failed to wait for drawing in 1 sec");
-        }
-
-        println!("Present frame");
-        swap_chain.present(&mut command_queue, &[]);
-
-        device.reset_fences(&[&finish]);
-
-        println!("Reset pool");
-        command_pool.reset();
-
-        #[cfg(feature = "metal")]
-        unsafe {
-            autorelease_pool.reset();
-        }
+        // println!("Present frame");
+        swap_chain.present(&mut command_queue, Some(&release[i % 3]));
     }
 
-    println!("FINISH");
+    if !device.wait_for_fences(&[&finish[total % 3]], WaitFor::All, !0) {
+        panic!("Failed to wait for drawing");
+    }
+
+    let end = ::std::time::Instant::now();
+    let dur = end - start;
+    let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1000000000f64);
+    println!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
+    println!("Total frames rendered: {}", total);
+    println!("Average FPS: {}", fps);
+
+    // println!("FINISH");
     ::std::process::exit(0);
 }
