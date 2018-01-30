@@ -7,12 +7,12 @@ repository = "https://github.com/omni-viral/xfg-rs.git"
 [dependencies]
 cgmath = "0.16"
 env_logger = "0.5"
-gfx_mem = { version = "0.1.0", path = "/Users/zakarum/pet/gfx_mem" }
-gfx-hal = { version = "0.1.0", path = "/Users/zakarum/pet/gfx/src/hal" }
-gfx-backend-dx12 = { path = "/Users/zakarum/pet/gfx/src/backend/dx12", optional = true }
-gfx-backend-gl = { path = "/Users/zakarum/pet/gfx/src/backend/gl", optional = true }
-gfx-backend-metal = { path = "/Users/zakarum/pet/gfx/src/backend/metal", optional = true }
-gfx-backend-vulkan = { path = "/Users/zakarum/pet/gfx/src/backend/vulkan", optional = true }
+gfx_mem = { version = "0.1.0", git = "https://github.com/omni-viral/gfx_mem.git", branch = "impl" }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 xfg = { path = ".." }
 smallvec = "0.4"
 winit = "0.10"
