@@ -1,6 +1,5 @@
 
 
-#![deny(dead_code)]
 #![deny(unused_imports)]
 #![deny(unused_must_use)]
 
@@ -14,7 +13,7 @@ extern crate xfg;
 
 use std::borrow::Borrow;
 
-use cgmath::{Deg, Matrix4, PerspectiveFov, SquareMatrix};
+use cgmath::Matrix4;
 use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{CommandBuffer, RenderPassInlineEncoder, Primary};
@@ -388,6 +387,13 @@ where
     }
 }
 
+#[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
+fn main() {
+    println!("You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example");
+}
+
+#[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
+#[deny(dead_code)]
 fn main() {
     #[cfg(feature = "dx12")]
     extern crate gfx_backend_dx12 as back;
@@ -398,6 +404,7 @@ fn main() {
     #[cfg(feature = "vulkan")]
     extern crate gfx_backend_vulkan as back;
 
+    use cgmath::{Deg, PerspectiveFov, SquareMatrix};
     use gfx_hal::{Instance, PhysicalDevice, Surface};
     use gfx_hal::command::{ClearColor, ClearDepthStencil, Rect, Viewport};
     use gfx_hal::device::{Extent, WaitFor};
