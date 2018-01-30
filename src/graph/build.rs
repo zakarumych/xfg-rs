@@ -266,7 +266,7 @@ where
         let mut color_targets = HashMap::<*const _, (Range<usize>, usize)>::new();
         color_targets.insert(present, (0..image_views.len(), 0));
         for attachment in color_attachments {
-            if eq(attachment, present) {
+            if !eq(attachment, present) {
                 color_targets.insert(
                     attachment,
                     (
