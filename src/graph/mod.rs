@@ -72,8 +72,9 @@ where
     ///             (or `Framebuffer` reference that corresponds to index `0`)
     /// - `acquire`: surface acquisition semaphore.
     /// - `release`: presentation will wait on this.
-    /// - `viewport`: portion of framebuffers to draw to
-    /// - `finish`: last submission should set this fence
+    /// - `viewport`: portion of framebuffers to draw to.
+    /// - `finish`: last submission should set this fence.
+    ///             Application must wait for this fence before calling `draw_inline` again with same `frame`.
     /// - `device`: you need this guy everywhere =^_^=
     /// - `aux`: auxiliary data for passes.
     ///
