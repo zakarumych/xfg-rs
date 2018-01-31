@@ -2,6 +2,7 @@
 
 #![deny(unused_imports)]
 #![deny(unused_must_use)]
+#![allow(dead_code)]
 
 extern crate cgmath;
 extern crate env_logger;
@@ -442,6 +443,8 @@ fn main() {
         back::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
     };
 
+    events_loop.poll_events(|_| ());
+
     let (width, height) = window.get_inner_size().unwrap();
     let hidpi = window.hidpi_factor();
     println!("Width: {}, Height: {}, HIDPI: {}", width, height, hidpi);
@@ -461,6 +464,8 @@ fn main() {
         let mut adapters = surface.enumerate_adapters();
         (adapters.remove(0), surface)
     };
+
+    events_loop.poll_events(|_| ());
 
     let surface_format = surface
         .capabilities_and_formats(&adapter.physical_device)
@@ -488,13 +493,18 @@ fn main() {
             surface.supports_queue_family(family)
         }).unwrap();
 
-    let mut command_pools = (0..3).map(|_| device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)).collect::<Vec<_>>();
-    let mut command_queue = &mut queue_group.queues[0];
+    let buffering = 3;
 
     let swap_config = SwapchainConfig::new()
         .with_color(surface_format)
-        .with_image_count(3);
+        .with_image_count(buffering);
     let (mut swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
+
+    let mut command_pools = (0..buffering).map(|_| device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)).collect::<Vec<_>>();
+    let mut command_queue = &mut queue_group.queues[0];
+
+
+    events_loop.poll_events(|_| ());
 
     let mut graph = {
         let depth = DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0));
@@ -534,9 +544,9 @@ fn main() {
         allocator,
     };
 
-    let mut acquires = (0..4).map(|_| device.create_semaphore()).collect::<Vec<_>>();
-    let mut releases = (0..3).map(|_| device.create_semaphore()).collect::<Vec<_>>();
-    let mut finishes = (0..3).map(|_| device.create_fence(false)).collect::<Vec<_>>();
+    let mut acquires = (0..buffering+1).map(|_| device.create_semaphore()).collect::<Vec<_>>();
+    let mut releases = (0..buffering).map(|_| device.create_semaphore()).collect::<Vec<_>>();
+    let mut finishes = (0..buffering).map(|_| device.create_fence(false)).collect::<Vec<_>>();
 
     struct Job<B: Backend> {
         acquire: B::Semaphore,
@@ -545,7 +555,7 @@ fn main() {
         command_pool: CommandPool<B, Graphics>,
     }
 
-    let mut jobs: Vec<Option<Job<_>>> = vec![None, None, None];
+    let mut jobs: Vec<Option<Job<_>>> = (0..buffering).map(|_| None).collect();
 
     let start = ::std::time::Instant::now();
     let total = 10000;
@@ -614,7 +624,7 @@ fn main() {
             command_pool,
         });
     }
-
+    
     for id in 0 .. jobs.len() {
         if let Some(mut job) = jobs[id].take() {
             if !device.wait_for_fences(&[&job.finish], WaitFor::All, !0) {
@@ -642,6 +652,6 @@ fn main() {
     println!("Total frames rendered: {}", total);
     println!("Average FPS: {}", fps);
 
-    // println!("FINISH");
+    // TODO: Dispose everything properly.
     ::std::process::exit(0);
 }
