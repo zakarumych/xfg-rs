@@ -107,6 +107,8 @@ where
 ///
 /// - `B`: render `Backend`
 /// - `T`: auxiliary data used by the `Pass`es in the `Graph`
+#[derive(Derivative)]
+#[derivative(Debug(bound = ""))]
 pub struct GraphBuilder<'a, B: Backend, T> {
     passes: Vec<PassBuilder<'a, B, T>>,
     present: Option<&'a ColorAttachment>,
@@ -229,9 +231,12 @@ where
         A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
         I: Borrow<B::Image>,
     {
+        info!("Building graph from {:?}", self);
         let present = self.present
             .ok_or(GraphBuildError::PresentationAttachmentNotSet)?;
         let backbuffer = self.backbuffer.ok_or(GraphBuildError::BackbufferNotSet)?;
+
+        info!("Collect views from backbuffer");
         // Create views for backbuffer
         let (mut image_views, frames) = match *backbuffer {
             Backbuffer::Images(ref images) => (
@@ -252,17 +257,18 @@ where
             Backbuffer::Framebuffer(_) => (vec![], 1),
         };
 
+        info!("Reorder passes to maximize overlapping");
         // Reorder passes to maximise overlapping
         // while keeping all dependencies before dependants.
         let (passes, deps) = reorder_passes(self.passes);
 
+        info!("Collect all used attachments");
         let color_attachments = color_attachments(&passes);
         let depth_stencil_attachments = depth_stencil_attachments(&passes);
 
-        // Setup image storage
         let mut images = vec![];
 
-        // Initialize all targets
+        info!("Initialize color targets");
         let mut color_targets = HashMap::<*const _, (Range<usize>, usize)>::new();
         color_targets.insert(present, (0..image_views.len(), 0));
         for attachment in color_attachments {
@@ -286,6 +292,7 @@ where
             }
         }
 
+        info!("Initialize depth-stencil targets");
         let mut depth_stencil_targets = HashMap::<*const _, (Range<usize>, usize)>::new();
         for attachment in depth_stencil_attachments {
             depth_stencil_targets.insert(
@@ -306,13 +313,13 @@ where
             );
         }
 
-        // Build pass nodes from pass builders
+        info!("Build pass nodes from pass builders");
         let mut pass_nodes: Vec<PassNode<B, T>> = Vec::new();
 
         let mut first_draws_to_surface = None;
 
         for (pass, last_dep) in passes.into_iter().zip(deps) {
-            // Collect input targets
+            info!("Collect input targets");
             let inputs = pass.inputs
                 .iter()
                 .map(|input| {
@@ -333,6 +340,7 @@ where
                 })
                 .collect::<Vec<_>>();
 
+            info!("Collect color targets");
             let colors = pass.colors
                 .iter()
                 .enumerate()
@@ -350,7 +358,7 @@ where
 
                     ColorAttachmentDesc {
                         format: color.format,
-                        view: if indices != (0..0) {
+                        view: if is_images(backbuffer) {
                             AttachmentImageViews::Owned(&image_views[indices])
                         } else {
                             AttachmentImageViews::External
@@ -360,6 +368,7 @@ where
                 })
                 .collect::<Vec<_>>();
 
+            info!("Collect depth-stencil targets");
             let depth_stencil = pass.depth_stencil.clone().map(|(depth, _stencil)| {
                 let depth = depth.unwrap();
                 let (ref indices, ref mut written) =
@@ -371,7 +380,7 @@ where
 
                 DepthStencilAttachmentDesc {
                     format: depth.format,
-                    view: if indices != (0..0) {
+                    view: if is_images(backbuffer) {
                         AttachmentImageViews::Owned(&image_views[indices])
                     } else {
                         AttachmentImageViews::External
@@ -395,7 +404,7 @@ where
                     .is_none()
                 {
                     // No passes prior this depends on `last_dep`
-                    Some((last_dep, PipelineStage::TOP_OF_PIPE)) // Pick better
+                    Some((last_dep, PipelineStage::TOP_OF_PIPE)) // Pick better stage.
                 } else {
                     None
                 };
@@ -404,6 +413,7 @@ where
             pass_nodes.push(node);
         }
 
+        info!("Create semaphores");
         let mut signals = Vec::new();
         for i in 0..pass_nodes.len() {
             if let Some(j) = pass_nodes.iter().position(|node| {
@@ -632,4 +642,16 @@ where
     deps.sort();
     deps.dedup();
     deps
+}
+
+/// Check if backbuffer is a collection of images
+/// or external framebuffer.
+fn is_images<B>(backbuffer: &Backbuffer<B>) -> bool
+where
+    B: Backend,
+{
+    match *backbuffer {
+        Backbuffer::Images(_) => true,
+        Backbuffer::Framebuffer(_) => false,
+    }
 }

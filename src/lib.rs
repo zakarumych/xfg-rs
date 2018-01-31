@@ -14,6 +14,8 @@
 #[macro_use]
 extern crate derivative;
 extern crate gfx_hal;
+#[macro_use]
+extern crate log;
 extern crate relevant;
 extern crate smallvec;
 

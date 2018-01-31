@@ -22,7 +22,7 @@ use pass::{Pass, PassNode};
 /// - `B`: hal `Backend`
 /// - `T`: auxiliary data used by the inner `Pass`
 #[derive(Derivative)]
-#[derivative(Debug)]
+#[derivative(Debug(bound = ""))]
 pub struct PassBuilder<'a, B: Backend, T> {
     pub(crate) inputs: Vec<Option<Attachment<'a>>>,
     pub(crate) colors: Vec<Option<&'a ColorAttachment>>,
@@ -132,6 +132,8 @@ where
         depth_stencil: Option<DepthStencilAttachmentDesc<B>>,
         extent: Extent,
     ) -> Result<PassNode<B, T>, GraphBuildError<E>> {
+        info!("Build pass from {:?}", self);
+
         // Check attachments
         assert_eq!(inputs.len(), self.pass.inputs());
         assert_eq!(colors.len(), self.pass.colors());
@@ -159,35 +161,43 @@ where
 
         // Construct `RenderPass`
         // with single `Subpass` for now
-        let render_pass = {
+        let renderpass = {
             // Configure input attachments first
-            let inputs = inputs.iter().map(|input| pass::Attachment {
-                format: Some(input.format),
-                ops: pass::AttachmentOps {
-                    load: pass::AttachmentLoadOp::Load,
-                    store: pass::AttachmentStoreOp::Store,
-                },
-                stencil_ops: pass::AttachmentOps::DONT_CARE,
-                layouts: image::ImageLayout::General..image::ImageLayout::General,
+            let inputs = inputs.iter().map(|input| {
+                let attachment = pass::Attachment {
+                    format: Some(input.format),
+                    ops: pass::AttachmentOps {
+                        load: pass::AttachmentLoadOp::Load,
+                        store: pass::AttachmentStoreOp::Store,
+                    },
+                    stencil_ops: pass::AttachmentOps::DONT_CARE,
+                    layouts: image::ImageLayout::General..image::ImageLayout::General,
+                };
+                debug!("Init input attachment: {:?}", attachment);
+                attachment
             });
 
             // Configure color attachments next to input
-            let colors = colors.iter().map(|color| pass::Attachment {
-                format: Some(color.format),
-                ops: pass::AttachmentOps {
-                    load: if color.clear.is_some() {
-                        pass::AttachmentLoadOp::Clear
-                    } else {
-                        pass::AttachmentLoadOp::Load
+            let colors = colors.iter().map(|color| {
+                let attachment = pass::Attachment {
+                    format: Some(color.format),
+                    ops: pass::AttachmentOps {
+                        load: if color.clear.is_some() {
+                            pass::AttachmentLoadOp::Clear
+                        } else {
+                            pass::AttachmentLoadOp::Load
+                        },
+                        store: pass::AttachmentStoreOp::Store,
                     },
-                    store: pass::AttachmentStoreOp::Store,
-                },
-                stencil_ops: pass::AttachmentOps::DONT_CARE,
-                layouts: if color.clear.is_some() {
-                    image::ImageLayout::Undefined
-                } else {
-                    image::ImageLayout::General
-                }..image::ImageLayout::General,
+                    stencil_ops: pass::AttachmentOps::DONT_CARE,
+                    layouts: if color.clear.is_some() {
+                        image::ImageLayout::Undefined
+                    } else {
+                        image::ImageLayout::General
+                    }..image::ImageLayout::General,
+                };
+                debug!("Init color attachment: {:?}", attachment);
+                attachment
             });
 
             // Configure depth-stencil attachments last
@@ -226,7 +236,7 @@ where
                         image::ImageLayout::General
                     }..image::ImageLayout::General,
                 };
-                println!("Init depth attachment {:?}", attachment);
+                debug!("Init depth attachment {:?}", attachment);
                 attachment
             });
 
@@ -249,25 +259,28 @@ where
                 preserves: &[],
             };
 
-            // Create `RenderPass` with all attachments
-            // and single `Subpass`
-            device.create_render_pass(
+            info!("Create randerpass");
+            let renderpass = device.create_render_pass(
                 &inputs
                     .chain(colors)
                     .chain(depth_stencil)
                     .collect::<Vec<_>>(),
                 &[subpass],
                 &[], // TODO: Add external subpass dependency
-            )
+            );
+
+            debug!("Randerpass: {:?}", renderpass);
+            renderpass
         };
 
         let descriptors = DescriptorPool::new(&self.pass.bindings(), device);
 
-        // Create `PipelineLayout` from single `DescriptorSetLayout`
+        info!("Create pipeline layout");
         let pipeline_layout = device.create_pipeline_layout(&[descriptors.layout()], &[]);
+        debug!("Pipeline layout: {:?}", pipeline_layout);
 
         let mut shaders = SmallVec::new();
-        // Create `GraphicsPipeline`
+        info!("Create graphics pipeline");
         let graphics_pipeline = {
             // Init basic configuration
             let mut pipeline_desc = pso::GraphicsPipelineDesc::new(
@@ -277,7 +290,7 @@ where
                 &pipeline_layout,
                 pass::Subpass {
                     index: 0,
-                    main_pass: &render_pass,
+                    main_pass: &renderpass,
                 },
             );
 
@@ -304,10 +317,13 @@ where
             }
 
             // Create `GraphicsPipeline`
-            device
+            let graphics_pipeline = device
                 .create_graphics_pipelines(&[pipeline_desc])
                 .pop()
-                .unwrap()?
+                .unwrap()?;
+            
+            debug!("Graphics pipeline: {:?}", graphics_pipeline);
+            graphics_pipeline
         };
 
         for module in shaders {
@@ -336,6 +352,8 @@ where
                 .map(ClearValue::DepthStencil),
         );
 
+        debug!("Clear values: {:?}", clears);
+
         // create framebuffers
         let framebuffer: SuperFramebuffer<B> = {
             if colors.len() == 1 && match colors[0].view {
@@ -353,7 +371,7 @@ where
                     .map(|view| match *view {
                         AttachmentImageViews::Owned(ref images) => images,
                         AttachmentImageViews::External => {
-                            unreachable!("External framebuffer isn't valid for multicolor output")
+                            panic!("External framebuffer isn't valid for multicolor output")
                         }
                     })
                     .for_each(|images| {
@@ -366,6 +384,7 @@ where
 
                 let frames = frames.unwrap_or(vec![]);
 
+                // transpose frame matrix
                 if frames.len() > 1 {
                     assert!(
                         frames[1..]
@@ -376,17 +395,19 @@ where
 
                 SuperFramebuffer::Owned(frames
                     .iter()
-                    .map(|targets| device.create_framebuffer(&render_pass, targets, extent))
+                    .map(|targets| device.create_framebuffer(&renderpass, targets, extent))
                     .collect::<Result<Vec<_>, _>>()?)
             }
         };
+
+        debug!("Framebuffer: {:?}", framebuffer);
 
         Ok(PassNode {
             clears,
             descriptors,
             pipeline_layout,
             graphics_pipeline,
-            render_pass,
+            renderpass,
             framebuffer,
             pass: self.pass,
             depends: None,

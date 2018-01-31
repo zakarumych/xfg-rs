@@ -157,7 +157,7 @@ pub(crate) struct PassNode<B: Backend, T> {
     descriptors: DescriptorPool<B>,
     pipeline_layout: B::PipelineLayout,
     graphics_pipeline: B::GraphicsPipeline,
-    render_pass: B::RenderPass,
+    renderpass: B::RenderPass,
     framebuffer: SuperFramebuffer<B>,
     pass: Box<Pass<B, T>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
@@ -223,7 +223,7 @@ where
         let encoder = {
             // Begin render pass with single inline subpass
             cbuf.begin_renderpass_inline(
-                &self.render_pass,
+                &self.renderpass,
                 pick(&self.framebuffer, frame),
                 rect,
                 &self.clears,
@@ -252,7 +252,7 @@ where
             },
             _ => {}
         }
-        device.destroy_renderpass(self.render_pass);
+        device.destroy_renderpass(self.renderpass);
         device.destroy_graphics_pipeline(self.graphics_pipeline);
         device.destroy_pipeline_layout(self.pipeline_layout);
     }
