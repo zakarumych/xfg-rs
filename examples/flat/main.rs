@@ -409,7 +409,7 @@ fn main() {
     use gfx_hal::command::{ClearColor, ClearDepthStencil, Rect, Viewport};
     use gfx_hal::device::{Extent, WaitFor};
     use gfx_hal::format::ChannelType;
-    use gfx_hal::pool::CommandPoolCreateFlags;
+    use gfx_hal::pool::{CommandPool, CommandPoolCreateFlags};
     use gfx_hal::queue::Graphics;
     use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
 
@@ -441,6 +441,12 @@ fn main() {
         ).with_vsync(true);
         back::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
     };
+
+    let (width, height) = window.get_inner_size().unwrap();
+    let hidpi = window.hidpi_factor();
+    println!("Width: {}, Height: {}, HIDPI: {}", width, height, hidpi);
+    let width = width as f32 * hidpi;
+    let height = height as f32 * hidpi;
     
     #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
     let (_instance, adapter, mut surface) = {
@@ -482,7 +488,7 @@ fn main() {
             surface.supports_queue_family(family)
         }).unwrap();
 
-    let mut command_pool = (0..3).map(|_| device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)).collect::<Vec<_>>();
+    let mut command_pools = (0..3).map(|_| device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)).collect::<Vec<_>>();
     let mut command_queue = &mut queue_group.queues[0];
 
     let swap_config = SwapchainConfig::new()
@@ -495,11 +501,11 @@ fn main() {
         let present = ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.3, 0.4, 0.5, 1.0]));
         let pass = DrawFlat.build()
             .with_color(0, &present)
-            .with_depth(&depth)
-            ;
+            .with_depth(&depth);
+
         GraphBuilder::new()
             .with_pass(pass)
-            .with_extent(Extent { width: 480, height: 480, depth: 1 })
+            .with_extent(Extent { width: width as u32, height: height as u32, depth: 1 })
             .with_backbuffer(&backbuffer)
             .with_present(&present)
             .build(&device, |kind, level, format, usage, properties, device| {
@@ -528,67 +534,105 @@ fn main() {
         allocator,
     };
 
-    let acquire = (0..3).map(|_| device.create_semaphore()).collect::<Vec<_>>();
-    let release = (0..3).map(|_| device.create_semaphore()).collect::<Vec<_>>();
-    let finish = (0..3).map(|_| device.create_fence(true)).collect::<Vec<_>>();
+    let mut acquires = (0..4).map(|_| device.create_semaphore()).collect::<Vec<_>>();
+    let mut releases = (0..3).map(|_| device.create_semaphore()).collect::<Vec<_>>();
+    let mut finishes = (0..3).map(|_| device.create_fence(false)).collect::<Vec<_>>();
+
+    struct Job<B: Backend> {
+        acquire: B::Semaphore,
+        release: B::Semaphore,
+        finish: B::Fence,
+        command_pool: CommandPool<B, Graphics>,
+    }
+
+    let mut jobs: Vec<Option<Job<_>>> = vec![None, None, None];
 
     let start = ::std::time::Instant::now();
-    let total = 100000;
-    for i in 0 .. total {
+    let total = 10000;
+    for _ in 0 .. total {
         // println!("Iteration: {}", i);
         // println!("Poll events");
         events_loop.poll_events(|_| ());
 
-        // println!("Sleep a bit");
-        // ::std::thread::sleep(::std::time::Duration::from_millis(100));
-
-        // println!("Wait for idle");
-        if !device.wait_for_fences(&[&finish[i % 3]], WaitFor::All, !0) {
-            panic!("Failed to wait for drawing");
-        }
+        // There is always one unused.
+        let acquire = acquires.pop().unwrap();
 
         // println!("Acquire frame");
-        let frame = swap_chain.acquire_frame(FrameSync::Semaphore(&acquire[i % 3]));
-        assert_eq!(i % 3, frame.id());
+        let frame = swap_chain.acquire_frame(FrameSync::Semaphore(&acquire));
+        let id = frame.id();
 
-        device.reset_fences(&[&finish[i % 3]]);
+        if let Some(mut job) = jobs[id].take() {
+            if !device.wait_for_fences(&[&job.finish], WaitFor::All, !0) {
+                panic!("Failed to wait for drawing");
+            }
+            device.reset_fences(&[&job.finish]);
+            job.command_pool.reset();
 
-        // println!("Reset pool");
-        command_pool[i % 3].reset();
+            #[cfg(feature = "metal")]
+            unsafe {
+                autorelease_pool.reset();
+            }
 
-        #[cfg(feature = "metal")]
-        unsafe {
-            autorelease_pool.reset();
+            acquires.push(job.acquire);
+            releases.push(job.release);
+            finishes.push(job.finish);
+            command_pools.push(job.command_pool);
         }
+
+        let release = releases.pop().unwrap();
+        let finish = finishes.pop().unwrap();
+        let mut command_pool = command_pools.pop().unwrap();
+
         let frame = SuperFrame::new(&backbuffer, frame);
 
-        // println!("Draw inline");
         graph.draw_inline(
             &mut command_queue,
-            &mut command_pool[i % 3],
+            &mut command_pool,
             frame,
-            &acquire[i % 3],
-            &release[i % 3],
+            &acquire,
+            &release,
             Viewport {
                 rect: Rect {
                     x: 0,
                     y: 0,
-                    w: 480,
-                    h: 480,
+                    w: width as u16,
+                    h: height as u16,
                 },
                 depth: 0.0 .. 1.0,
             },
-            &finish[i % 3],
+            &finish,
             &device,
             &mut scene,
         );
 
-        // println!("Present frame");
-        swap_chain.present(&mut command_queue, Some(&release[i % 3]));
+        swap_chain.present(&mut command_queue, Some(&release));
+
+        jobs[id] = Some(Job {
+            acquire,
+            release,
+            finish,
+            command_pool,
+        });
     }
 
-    if !device.wait_for_fences(&[&finish[total % 3]], WaitFor::All, !0) {
-        panic!("Failed to wait for drawing");
+    for id in 0 .. jobs.len() {
+        if let Some(mut job) = jobs[id].take() {
+            if !device.wait_for_fences(&[&job.finish], WaitFor::All, !0) {
+                panic!("Failed to wait for drawing");
+            }
+            device.reset_fences(&[&job.finish]);
+            job.command_pool.reset();
+
+            #[cfg(feature = "metal")]
+            unsafe {
+                autorelease_pool.reset();
+            }
+
+            acquires.push(job.acquire);
+            releases.push(job.release);
+            finishes.push(job.finish);
+            command_pools.push(job.command_pool);
+        }
     }
 
     let end = ::std::time::Instant::now();
