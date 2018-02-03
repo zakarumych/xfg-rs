@@ -13,6 +13,7 @@ gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true 
 gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 xfg = { path = ".." }
 smallvec = "0.4"
 winit = "0.10"
@@ -25,4 +26,8 @@ vulkan = ["gfx-backend-vulkan"]
 
 [[bin]]
 name = "flat"
-path = "flat/main.rs"
+path = "src/flat/main.rs"
+
+[[bin]]
+name = "pbm"
+path = "src/pbm/main.rs"
