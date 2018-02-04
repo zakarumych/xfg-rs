@@ -4,13 +4,14 @@
 #![deny(unused_must_use)]
 #![allow(dead_code)]
 
-extern crate xfg_examples;
 extern crate smallvec;
+extern crate xfg_examples;
 use xfg_examples::*;
 
 use std::borrow::Borrow;
+use std::sync::Arc;
 
-use cgmath::{Deg, PerspectiveFov, SquareMatrix, Matrix4};
+use cgmath::{Deg, Transform, Matrix4};
 
 use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
@@ -23,9 +24,6 @@ use gfx_hal::queue::Transfer;
 use gfx_mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
 use xfg::{DescriptorPool, Pass, ColorAttachment, DepthStencilAttachment, GraphBuilder};
-
-// use gfx_hal::pool::{CommandPool};
-
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,29 +124,32 @@ where
     )
     {
         let ref mut allocator = scene.allocator;
+        let view = scene.camera.transform.inverse_transform().unwrap();
+
         // Update uniform cache
         for obj in &mut scene.objects {
             let trprojview = TrProjView {
                 transform: obj.transform,
-                projection: scene.camera.proj,
-                view: scene.camera.view,
+                projection: scene.camera.projection,
+                view,
             };
 
             let cache = obj.cache.get_or_insert_with(|| {
-                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, ::std::mem::size_of::<TrProjView>() as u64, Usage::UNIFORM).unwrap();
+                let size = ::std::mem::size_of::<TrProjView>() as u64;
+                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[DescriptorSetWrite {
                     set: &set,
                     binding: 0,
                     array_offset: 0,
-                    write: DescriptorWrite::UniformBuffer(vec![(buffer.borrow(), buffer.range())]),
+                    write: DescriptorWrite::UniformBuffer(vec![(buffer.borrow(), 0 .. size)]),
                 }]);
                 Cache {
-                    uniform: buffer,
+                    uniforms: vec![buffer],
                     set,
                 }
             });
-            cbuf.update_buffer(cache.uniform.borrow(), 0, cast_slice(&[trprojview]));
+            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
         }
     }
 
@@ -163,13 +164,13 @@ where
             let cache = object.cache.as_ref().unwrap();
             encoder.bind_graphics_descriptor_sets(layout, 0, Some(&cache.set));
             encoder.bind_index_buffer(IndexBufferView {
-                buffer: object.indices.borrow(),
+                buffer: object.mesh.indices.borrow(),
                 offset: 0,
                 index_type: IndexType::U16,
             });
-            encoder.bind_vertex_buffers(VertexBufferSet(vec![(object.vertices.borrow(), 0)]));
+            encoder.bind_vertex_buffers(VertexBufferSet(vec![(object.mesh.vertices.borrow(), 0)]));
             encoder.draw_indexed(
-                0 .. object.index_count,
+                0 .. object.mesh.index_count,
                 0,
                 0 .. 1,
             );
@@ -180,13 +181,15 @@ where
         for object in &mut scene.objects {
             if let Some(cache) = object.cache.take() {
                 pool.free(cache.set);
-                scene.allocator.destroy_buffer(device, cache.uniform);
+                for uniform in cache.uniforms {
+                    scene.allocator.destroy_buffer(device, uniform);
+                }
             }
         }
     }
 }
 
-fn create_cube<B>(device: &B::Device, factory: &mut SmartAllocator<B>, transform: Matrix4<f32>) -> Object<B>
+fn create_cube<B>(device: &B::Device, factory: &mut SmartAllocator<B>) -> Mesh<B>
 where
     B: Backend,
 {
@@ -351,12 +354,10 @@ where
 
     let indices = buffer;
 
-    Object {
+    Mesh {
         vertices,
         indices,
         index_count,
-        transform,
-        cache: None,
     }
 }
 
@@ -376,28 +377,26 @@ where
         .with_present(colors.last().unwrap())
 }
 
-fn populate<B>(scene: &mut Scene<B>, device: &B::Device)
+fn fill<B>(scene: &mut Scene<B>, device: &B::Device)
 where
     B: Backend,
 {
-    let view = Matrix4::from_translation([0.0, 0.0, -5.0].into());
-    let view = view * Matrix4::from_angle_x(Deg(-45.0));
-    let view = view * Matrix4::from_angle_y(Deg(25.0));
+    let transform = Matrix4::from_translation([0.0, 0.0, 5.0].into());
+    let transform = Matrix4::from_angle_x(Deg(45.0)) * transform;
+    let transform = Matrix4::from_angle_y(Deg(25.0)) * transform;
 
-    let proj: Matrix4<f32> = PerspectiveFov {
-        fovy: Deg(60.0).into(),
-        aspect: 1.0,
-        near: 0.1,
-        far: 2000.0,
-    }.into();
+    scene.camera.transform = transform;
 
-    scene.objects = vec![create_cube(device, &mut scene.allocator, Matrix4::identity())];
-    scene.camera = Camera {
-        view,
-        proj,
-    };
+    let cube = create_cube(device, &mut scene.allocator);
+
+    scene.objects = vec![Object {
+        mesh: Arc::new(cube),
+        transform: Matrix4::one(),
+        data: (),
+        cache: None,
+    }];
 }
 
 fn main() {
-    run(graph::<back::Backend>, populate);
+    run(graph::<back::Backend>, fill);
 }

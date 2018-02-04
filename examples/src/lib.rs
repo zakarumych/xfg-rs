@@ -7,7 +7,9 @@ pub extern crate xfg;
 extern crate env_logger;
 extern crate winit;
 
-use cgmath::{Matrix4, SquareMatrix};
+use std::sync::Arc;
+
+use cgmath::{Deg, PerspectiveFov, Matrix4, SquareMatrix};
 use gfx_hal::{Backend, Device, IndexType, Instance, PhysicalDevice, Surface};
 use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{CommandBuffer, RenderPassInlineEncoder, Primary, Rect, Viewport};
@@ -42,25 +44,52 @@ pub const REQUEST_DEVICE_LOCAL: (Type, Properties) = (Type::General, Properties:
 pub const REQUEST_CPU_VISIBLE: (Type, Properties) = (Type::General, Properties::CPU_VISIBLE);
 
 pub struct Cache<B: Backend> {
-    pub uniform: Buffer<B>,
+    pub uniforms: Vec<Buffer<B>>,
     pub set: B::DescriptorSet,
 }
 
-pub struct Object<B: Backend> {
+pub struct Mesh<B: Backend> {
     pub indices: Buffer<B>,
     pub vertices: Buffer<B>,
     pub index_count: u32,
+}
+
+pub struct Object<B: Backend, T = ()> {
+    pub mesh: Arc<Mesh<B>>,
     pub transform: Matrix4<f32>,
+    pub data: T,
     pub cache: Option<Cache<B>>,
 }
 
-pub struct Camera {
-    pub view: Matrix4<f32>,
-    pub proj: Matrix4<f32>,
+#[derive(Clone, Copy, Debug)]
+pub struct AmbientLight(pub [f32; 3]);
+
+#[derive(Clone, Copy, Debug)]
+pub struct PointLight {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
 }
 
-pub struct Scene<B: Backend> {
-    pub objects: Vec<Object<B>>,
+#[derive(Clone, Copy, Debug)]
+pub struct DirectionalLight {
+    pub direction: [f32; 3],
+    pub color: [f32; 3],
+}
+
+pub enum Light {
+    Point(PointLight),
+    Directional(DirectionalLight),
+}
+
+pub struct Camera {
+    pub transform: Matrix4<f32>,
+    pub projection: Matrix4<f32>,
+}
+
+pub struct Scene<B: Backend, T = ()> {
+    pub objects: Vec<Object<B, T>>,
+    pub ambient: AmbientLight,
+    pub lights: Vec<Light>,
     pub camera: Camera,
     pub allocator: SmartAllocator<B>,
 }
@@ -73,10 +102,10 @@ pub fn run<T, Y>(_: T, _: Y) {
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
 #[deny(dead_code)]
-pub fn run<G, F>(graph: G, populate: F)
+pub fn run<G, F, T>(graph: G, fill: F)
 where
-    G: for<'a> FnOnce(Format, &'a mut Vec<ColorAttachment>, &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, back::Backend, Scene<back::Backend>>,
-    F: FnOnce(&mut Scene<back::Backend>, &<back::Backend as Backend>::Device),
+    G: for<'a> FnOnce(Format, &'a mut Vec<ColorAttachment>, &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, back::Backend, Scene<back::Backend, T>>,
+    F: FnOnce(&mut Scene<back::Backend, T>, &<back::Backend as Backend>::Device),
 {
 
     env_logger::init();
@@ -87,7 +116,7 @@ where
     let mut events_loop = EventsLoop::new();
 
     let wb = WindowBuilder::new()
-        .with_dimensions(480, 480)
+        .with_dimensions(960, 640)
         .with_title("flat".to_string());
 
     #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
@@ -145,7 +174,7 @@ where
         .physical_device
         .memory_properties();
 
-    let mut allocator = SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 480 * 480 * 64);
+    let mut allocator = SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 1024 * 1024 * 64);
 
     let (device, mut queue_group) =
         adapter.open_with::<_, Graphics>(1, |family| {
@@ -175,17 +204,26 @@ where
             }).unwrap()
     };
 
+    let projection: Matrix4<f32> = PerspectiveFov {
+        fovy: Deg(60.0).into(),
+        aspect: (width as f32) / (height as f32),
+        near: 0.1,
+        far: 2000.0,
+    }.into();
+
     let mut scene = Scene {
         objects: Vec::new(),
+        ambient: AmbientLight([0.0, 0.0, 0.0]),
+        lights: Vec::new(),
         camera: Camera {
-            view: Matrix4::identity(),
-            proj: Matrix4::identity(),
+            transform: Matrix4::identity(),
+            projection,
         },
         allocator,
     };
 
-    // populate scene
-    populate(&mut scene, &device);
+    // fill scene
+    fill(&mut scene, &device);
 
     let mut acquires = (0..buffering+1).map(|_| device.create_semaphore()).collect::<Vec<_>>();
     let mut releases = (0..buffering).map(|_| device.create_semaphore()).collect::<Vec<_>>();
