@@ -77,7 +77,7 @@ where
             self.pools
                 .last_mut()
                 .unwrap()
-                .allocate_sets(&[&self.layout])
+                .allocate_sets(Some(&self.layout))
                 .pop()
                 .unwrap()
         } else {

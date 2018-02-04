@@ -61,25 +61,14 @@ pub struct Object<B: Backend, T = ()> {
     pub cache: Option<Cache<B>>,
 }
 
+pub struct Light<B: Backend> {
+    pub color: [f32; 3],
+    pub transform: Matrix4<f32>,
+    pub cache: Option<Cache<B>>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct AmbientLight(pub [f32; 3]);
-
-#[derive(Clone, Copy, Debug)]
-pub struct PointLight {
-    pub position: [f32; 3],
-    pub color: [f32; 3],
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct DirectionalLight {
-    pub direction: [f32; 3],
-    pub color: [f32; 3],
-}
-
-pub enum Light {
-    Point(PointLight),
-    Directional(DirectionalLight),
-}
 
 pub struct Camera {
     pub transform: Matrix4<f32>,
@@ -89,7 +78,7 @@ pub struct Camera {
 pub struct Scene<B: Backend, T = ()> {
     pub objects: Vec<Object<B, T>>,
     pub ambient: AmbientLight,
-    pub lights: Vec<Light>,
+    pub lights: Vec<Light<B>>,
     pub camera: Camera,
     pub allocator: SmartAllocator<B>,
 }
@@ -253,10 +242,10 @@ where
         let id = frame.id();
 
         if let Some(mut job) = jobs[id].take() {
-            if !device.wait_for_fences(&[&job.finish], WaitFor::All, !0) {
+            if !device.wait_for_fences(Some(&job.finish), WaitFor::All, !0) {
                 panic!("Failed to wait for drawing");
             }
-            device.reset_fences(&[&job.finish]);
+            device.reset_fences(Some(&job.finish));
             job.command_pool.reset();
 
             #[cfg(feature = "metal")]
@@ -306,12 +295,13 @@ where
         });
     }
     
+    if !device.wait_for_fences(jobs.iter().filter_map(|job| job.as_ref().map(|job| &job.finish)), WaitFor::All, !0) {
+        panic!("Failed to wait for drawing");
+    }
+    device.reset_fences(jobs.iter().filter_map(|job| job.as_ref().map(|job| &job.finish)));
+    
     for id in 0 .. jobs.len() {
         if let Some(mut job) = jobs[id].take() {
-            if !device.wait_for_fences(&[&job.finish], WaitFor::All, !0) {
-                panic!("Failed to wait for drawing");
-            }
-            device.reset_fences(&[&job.finish]);
             job.command_pool.reset();
 
             #[cfg(feature = "metal")]

@@ -113,6 +113,18 @@ impl<'a> Attachment<'a> {
     }
 }
 
+impl<'a> From<&'a ColorAttachment> for Attachment<'a> {
+    fn from(color: &'a ColorAttachment) -> Self {
+        Attachment::Color(color)
+    }
+}
+
+impl<'a> From<&'a DepthStencilAttachment> for Attachment<'a> {
+    fn from(depth_stencil: &'a DepthStencilAttachment) -> Self {
+        Attachment::DepthStencil(depth_stencil)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum AttachmentImageViews<'a, B: Backend> {
     Owned(&'a [B::ImageView]),

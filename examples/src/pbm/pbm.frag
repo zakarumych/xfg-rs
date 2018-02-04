@@ -13,18 +13,16 @@ struct DirectionalLight {
     float _pad;
 };
 
-layout(binding=1, set=0) uniform FragmentArgs {
-    DirectionalLight dlight[16];
+layout(binding = 1, set = 0) uniform FragmentArgs {
     PointLight plight[32];
     vec3 camera_position;
-    int directional_light_count;
-    vec3 ambient_color;
     int point_light_count;
+    vec3 ambient_light;
+    float ambient_occlusion;
     vec3 albedo;
     float metallic;
     vec3 emission;
     float roughness;
-    float ambient_occlusion;
 };
 
 layout(location = 0) in VertexData {
@@ -90,7 +88,7 @@ void main() {
         lighted += (diffuse * albedo / PI + specular) * plight[i].color.rgb * intensity * NdotL;
     }
 
-    vec3 ambient = ambient_color * albedo * ambient_occlusion;
+    vec3 ambient = ambient_light * albedo * ambient_occlusion;
     vec3 color = ambient + lighted + emission;
    
     out_color = vec4(color, 1.0);

@@ -32,3 +32,7 @@ path = "src/flat/main.rs"
 [[bin]]
 name = "pbm"
 path = "src/pbm/main.rs"
+
+[[bin]]
+name = "pbm_deferred"
+path = "src/pbm_deferred/main.rs"

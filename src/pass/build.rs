@@ -61,7 +61,10 @@ where
     ///
     /// - `index`: index into the inner pass required input attachments
     /// - `input`: the input attachment to use
-    pub fn with_input(mut self, index: usize, input: Attachment<'a>) -> Self {
+    pub fn with_input<I>(mut self, index: usize, input: I) -> Self
+    where
+        I: Into<Attachment<'a>>,
+    {
         self.set_input(index, input);
         self
     }
@@ -72,8 +75,11 @@ where
     ///
     /// - `index`: index into the inner pass required input attachments
     /// - `input`: the input attachment to use
-    pub fn set_input(&mut self, index: usize, input: Attachment<'a>) {
-        self.inputs[index] = Some(input);
+    pub fn set_input<I>(&mut self, index: usize, input: I)
+    where
+        I: Into<Attachment<'a>>,
+    {
+        self.inputs[index] = Some(input.into());
     }
 
     /// Set the color attachment for the given index.
@@ -276,7 +282,7 @@ where
         let descriptors = DescriptorPool::new(&self.pass.bindings(), device);
 
         info!("Create pipeline layout");
-        let pipeline_layout = device.create_pipeline_layout(&[descriptors.layout()], &[]);
+        let pipeline_layout = device.create_pipeline_layout(Some(descriptors.layout()), &[]);
         debug!("Pipeline layout: {:?}", pipeline_layout);
 
         let mut shaders = SmallVec::new();
@@ -395,7 +401,7 @@ where
 
                 SuperFramebuffer::Owned(frames
                     .iter()
-                    .map(|targets| device.create_framebuffer(&renderpass, targets, extent))
+                    .map(|targets| device.create_framebuffer(&renderpass, targets.iter().cloned(), extent))
                     .collect::<Result<Vec<_>, _>>()?)
             }
         };

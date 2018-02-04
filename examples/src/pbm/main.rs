@@ -55,16 +55,6 @@ unsafe impl Pod for PointLight {}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct DirectionalLight {
-    color: [f32; 4],
-    direction: [f32; 3],
-    pad: f32,
-}
-
-unsafe impl Pod for DirectionalLight {}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq)]
 struct ObjectData {
     albedo: [f32; 3],
     metallic: f32,
@@ -76,17 +66,15 @@ struct ObjectData {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FragmentArgs {
-    dlight: [DirectionalLight; 16],
     plight: [PointLight; 32],
     camera_position: [f32; 3],
-    directional_light_count: i32,
-    ambient_color: [f32; 3],
     point_light_count: i32,
+    ambient_light: [f32; 3],
+    ambient_occlusion: f32,
     albedo: [f32; 3],
     metallic: f32,
     emission: [f32; 3],
     roughness: f32,
-    ambient_occlusion: f32,
 }
 
 unsafe impl Pod for FragmentArgs {}
@@ -102,7 +90,6 @@ impl<B> Pass<B, Scene<B, ObjectData>> for DrawPbm
 where
     B: Backend,
 {
-
     /// Name of the pass
     fn name(&self) -> &str {
         "DrawPbm"
@@ -193,6 +180,7 @@ where
     {
         let ref mut allocator = scene.allocator;
         let view = scene.camera.transform.inverse_transform().unwrap();
+        let camera_position = scene.camera.transform.transform_point(Point3::origin()).into();
         // Update uniform cache
         for obj in &mut scene.objects {
             let vertex_args = VertexArgs {
@@ -201,38 +189,25 @@ where
                 view,
             };
 
-            let mut dlight: [DirectionalLight; 16] = unsafe { ::std::mem::zeroed() };
             let mut plight: [PointLight; 32] = unsafe { ::std::mem::zeroed() };
-            let mut directional_light_count = 0;
             let mut point_light_count = 0;
 
             for light in &scene.lights {
-                match *light {
-                    Light::Directional(ref directional) => {
-                        dlight[directional_light_count].direction = directional.direction;
-                        dlight[directional_light_count].color = pad(directional.color, 1.0);
-                        directional_light_count += 1;
-                    }
-                    Light::Point(ref point) => {
-                        plight[point_light_count].position = point.position;
-                        plight[point_light_count].color = pad(point.color, 1.0);
-                        point_light_count += 1;
-                    }
-                }
+                plight[point_light_count].position = light.transform.transform_point(Point3::origin()).into();
+                plight[point_light_count].color = pad(light.color, 1.0);
+                point_light_count += 1;
             }
 
             let fragment_args = FragmentArgs {
-                dlight,
                 plight,
-                camera_position: scene.camera.transform.transform_point(Point3::origin()).into(),
-                directional_light_count: directional_light_count as i32,
-                ambient_color: scene.ambient.0,
+                camera_position,
                 point_light_count: point_light_count as i32,
+                ambient_light: scene.ambient.0,
+                ambient_occlusion: obj.data.ambient_occlusion,
                 albedo: obj.data.albedo,
                 metallic: obj.data.metallic,
                 emission: obj.data.emission,
                 roughness: obj.data.roughness,
-                ambient_occlusion: obj.data.ambient_occlusion,
             };
             
             let vertex_args_size = ::std::mem::size_of::<VertexArgs>() as u64;
@@ -277,7 +252,7 @@ where
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
         scene: &Scene<B, ObjectData>,
-    ) {       
+    ) {
         for object in &scene.objects {
             let cache = object.cache.as_ref().unwrap();
             encoder.bind_graphics_descriptor_sets(layout, 0, Some(&cache.set));
@@ -305,6 +280,73 @@ where
             }
         }
     }
+}
+
+fn graph<'a, B>(surface_format: Format, colors: &'a mut Vec<ColorAttachment>, depths: &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, B, Scene<B, ObjectData>>
+where
+    B: Backend,
+{
+    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
+    depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
+
+    let pass = DrawPbm.build()
+        .with_color(0, colors.last().unwrap())
+        .with_depth(depths.last().unwrap());
+
+    GraphBuilder::new()
+        .with_pass(pass)
+        .with_present(colors.last().unwrap())
+}
+
+fn fill<B>(scene: &mut Scene<B, ObjectData>, device: &B::Device)
+where
+    B: Backend,
+{
+    scene.camera.transform = Matrix4::from_translation([0.0, 0.0, 15.0].into());
+
+    let mut data = ObjectData {
+        albedo: [1.0; 3],
+        metallic: 0.0,
+        emission: [0.0, 0.0, 0.0],
+        roughness: 0.0,
+        ambient_occlusion: 1.0,
+    };
+
+    let sphere = Arc::new(create_sphere(device, &mut scene.allocator));
+
+    for i in 0 .. 6 {
+        for j in 0 .. 6 {
+            let transform = Matrix4::from_translation([2.5 * (i as f32) - 6.25, 2.5 * (j as f32) - 6.25, 0.0].into());
+            data.metallic = j as f32 * 0.2;
+            data.roughness = i as f32  * 0.2;
+            scene.objects.push(Object {
+                mesh: sphere.clone(),
+                data,
+                transform,
+                cache: None,
+            });
+        }
+    }
+
+    scene.lights.push(
+        Light {
+            color: [2.0, 0.0, 0.0],
+            transform: Matrix4::from_translation([2.0, 7.0, 10.0].into()),
+            cache: None,
+        }
+    );
+
+    scene.lights.push(
+        Light {
+            color: [0.0, 0.0, 2.0],
+            transform: Matrix4::from_translation([-7.0, 2.0, 10.0].into()),
+            cache: None,
+        }
+    );
+}
+
+fn main() {
+    run(graph::<back::Backend>, fill);
 }
 
 fn create_sphere<B>(device: &B::Device, factory: &mut SmartAllocator<B>) -> Mesh<B>
@@ -364,69 +406,4 @@ where
         indices,
         index_count,
     }
-}
-
-fn graph<'a, B>(surface_format: Format, colors: &'a mut Vec<ColorAttachment>, depths: &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, B, Scene<B, ObjectData>>
-where
-    B: Backend,
-{
-    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
-    depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
-
-    let pass = DrawPbm.build()
-        .with_color(0, colors.last().unwrap())
-        .with_depth(depths.last().unwrap());
-
-    GraphBuilder::new()
-        .with_pass(pass)
-        .with_present(colors.last().unwrap())
-}
-
-fn fill<B>(scene: &mut Scene<B, ObjectData>, device: &B::Device)
-where
-    B: Backend,
-{
-    scene.camera.transform = Matrix4::from_translation([0.0, 0.0, 15.0].into());
-
-    let mut data = ObjectData {
-        albedo: [1.0; 3],
-        metallic: 0.0,
-        emission: [0.0, 0.0, 0.0],
-        roughness: 0.0,
-        ambient_occlusion: 1.0,
-    };
-
-    let sphere = Arc::new(create_sphere(device, &mut scene.allocator));
-
-    for i in 0 .. 6 {
-        for j in 0 .. 6 {
-            let transform = Matrix4::from_translation([2.5 * (i as f32) - 6.25, 2.5 * (j as f32) - 6.25, 0.0].into());
-            data.metallic = j as f32 * 0.2;
-            data.roughness = i as f32  * 0.2;
-            scene.objects.push(Object {
-                mesh: sphere.clone(),
-                data,
-                transform,
-                cache: None,
-            });
-        }
-    }
-
-    scene.lights.push(
-        Light::Point(xfg_examples::PointLight {
-            position: [2.0, 7.0, 10.0],
-            color: [2.0, 0.0, 0.0],
-        })
-    );
-
-    scene.lights.push(
-        Light::Point(xfg_examples::PointLight {
-            position: [-7.0, 2.0, 10.0],
-            color: [0.0, 0.0, 2.0],
-        })
-    );
-}
-
-fn main() {
-    run(graph::<back::Backend>, fill);
 }
