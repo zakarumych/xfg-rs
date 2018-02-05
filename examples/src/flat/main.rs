@@ -136,7 +136,10 @@ where
                 view,
             };
 
-            let grow = (obj.cache.len() .. frame + 1).map(|_| {
+            let grow = (obj.cache.len() .. frame + 1).map(|_| None);
+            obj.cache.extend(grow);
+            
+            let cache = obj.cache[frame].get_or_insert_with(|| {
                 let size = ::std::mem::size_of::<TrProjView>() as u64;
                 let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
                 let set = pool.allocate(device);
@@ -151,8 +154,7 @@ where
                     set,
                 }
             });
-            obj.cache.extend(grow);
-            cbuf.update_buffer(obj.cache[frame].uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
+            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
         }
     }
 
@@ -166,7 +168,7 @@ where
         scene: &Scene<B>,
     ) {       
         for object in &scene.objects {
-            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].set));
+            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].as_ref().unwrap().set));
             encoder.bind_index_buffer(IndexBufferView {
                 buffer: object.mesh.indices.borrow(),
                 offset: 0,
@@ -184,9 +186,11 @@ where
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, scene: &mut Scene<B>) {
         for object in &mut scene.objects {
             for cache in object.cache.drain(..) {
-                pool.free(cache.set);
-                for uniform in cache.uniforms {
-                    scene.allocator.destroy_buffer(device, uniform);
+                if let Some(cache) = cache {
+                    pool.free(cache.set);
+                    for uniform in cache.uniforms {
+                        scene.allocator.destroy_buffer(device, uniform);
+                    }
                 }
             }
         }

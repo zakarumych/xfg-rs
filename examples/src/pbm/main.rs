@@ -216,7 +216,9 @@ where
             let fragment_args_size = ::std::mem::size_of::<FragmentArgs>() as u64;
             let size = vertex_args_size + fragment_args_size;
 
-            let grow = (obj.cache.len() .. frame + 1).map(|_| {
+            let grow = (obj.cache.len() .. frame + 1).map(|_| None);
+            obj.cache.extend(grow);            
+            let cache = obj.cache[frame].get_or_insert_with(|| {
                 let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
@@ -242,9 +244,8 @@ where
                     set,
                 }
             });
-            obj.cache.extend(grow);
-            cbuf.update_buffer(obj.cache[frame].uniforms[0].borrow(), 0, cast_slice(&[vertex_args]));
-            cbuf.update_buffer(obj.cache[frame].uniforms[0].borrow(), vertex_args_size, cast_slice(&[fragment_args]));
+            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[vertex_args]));
+            cbuf.update_buffer(cache.uniforms[0].borrow(), vertex_args_size, cast_slice(&[fragment_args]));
         }
     }
 
@@ -258,7 +259,7 @@ where
         scene: &Scene<B, ObjectData>,
     ) {
         for object in &scene.objects {
-            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].set));
+            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].as_ref().unwrap().set));
             encoder.bind_index_buffer(IndexBufferView {
                 buffer: object.mesh.indices.borrow(),
                 offset: 0,
@@ -276,9 +277,11 @@ where
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, scene: &mut Scene<B, ObjectData>) {
         for object in &mut scene.objects {
             for cache in object.cache.drain(..) {
-                pool.free(cache.set);
-                for uniform in cache.uniforms {
-                    scene.allocator.destroy_buffer(device, uniform);
+                if let Some(cache) = cache {
+                    pool.free(cache.set);
+                    for uniform in cache.uniforms {
+                        scene.allocator.destroy_buffer(device, uniform);
+                    }
                 }
             }
         }

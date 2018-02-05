@@ -58,13 +58,13 @@ pub struct Object<B: Backend, T = ()> {
     pub mesh: Arc<Mesh<B>>,
     pub transform: Matrix4<f32>,
     pub data: T,
-    pub cache: Vec<Cache<B>>,
+    pub cache: Vec<Option<Cache<B>>>,
 }
 
 pub struct Light<B: Backend> {
     pub color: [f32; 3],
     pub transform: Matrix4<f32>,
-    pub cache: Vec<Cache<B>>,
+    pub cache: Vec<Option<Cache<B>>>,
 }
 
 #[derive(Clone, Copy, Debug)]
