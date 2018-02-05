@@ -3,6 +3,7 @@
 pub use self::build::PassBuilder;
 
 use std::fmt::Debug;
+use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
@@ -110,6 +111,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
+        frame: usize,
         aux: &mut T,
     );
 
@@ -129,6 +131,8 @@ where
         layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B, Primary>,
         device: &B::Device,
+        inputs: &[&B::ImageView],
+        frame: usize,
         aux: &T,
     );
 
@@ -161,6 +165,7 @@ pub(crate) struct PassNode<B: Backend, T> {
     framebuffer: SuperFramebuffer<B>,
     pass: Box<Pass<B, T>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
+    pub(crate) inputs: Vec<Range<usize>>,
 }
 
 impl<B, T> PassNode<B, T>
@@ -181,7 +186,7 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn prepare<C>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, aux: &mut T)
+    pub fn prepare<C>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, frame: usize, aux: &mut T)
     where
         C: Supports<Transfer>,
     {
@@ -190,7 +195,7 @@ where
         // * Store caches
         // * Bind pipeline layout with descriptors sets
         self.pass
-            .prepare(&mut self.descriptors, cbuf.downgrade(), device, aux);
+            .prepare(&mut self.descriptors, cbuf.downgrade(), device, frame, aux);
     }
 
     /// Binds pipeline and renderpass to the command buffer `cbuf`.
@@ -224,7 +229,7 @@ where
             // Begin render pass with single inline subpass
             cbuf.begin_renderpass_inline(
                 &self.renderpass,
-                pick(&self.framebuffer, frame),
+                pick(&self.framebuffer, &frame),
                 rect,
                 &self.clears,
             )
@@ -232,7 +237,7 @@ where
 
         // Record custom drawing calls
         self.pass
-            .draw_inline(&self.pipeline_layout, encoder, device, aux);
+            .draw_inline(&self.pipeline_layout, encoder, device, &[], frame.index(), aux);
     }
 
     /// Dispose of all internal data created by the pass.

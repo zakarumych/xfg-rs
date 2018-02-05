@@ -1,9 +1,9 @@
 //! Defines attachments for the rendering `Graph`.
 //!
 
+use std::ops::Range;
 use std::ptr::eq;
 
-use gfx_hal::Backend;
 use gfx_hal::command::{ClearColor, ClearDepthStencil};
 use gfx_hal::format::{AspectFlags, Format};
 
@@ -125,28 +125,28 @@ impl<'a> From<&'a DepthStencilAttachment> for Attachment<'a> {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum AttachmentImageViews<'a, B: Backend> {
-    Owned(&'a [B::ImageView]),
+#[derive(Clone, Debug)]
+pub(crate) enum AttachmentImageViews {
+    Owned(Range<usize>),
     External,
 }
 
-#[derive(Debug)]
-pub(crate) struct InputAttachmentDesc<'a, B: Backend> {
+#[derive(Clone, Debug)]
+pub(crate) struct InputAttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) view: &'a [B::ImageView],
+    pub(crate) view: Range<usize>,
 }
 
-#[derive(Debug)]
-pub(crate) struct ColorAttachmentDesc<'a, B: Backend> {
+#[derive(Clone, Debug)]
+pub(crate) struct ColorAttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) view: AttachmentImageViews<'a, B>,
+    pub(crate) view: AttachmentImageViews,
     pub(crate) clear: Option<ClearColor>,
 }
 
-#[derive(Debug)]
-pub(crate) struct DepthStencilAttachmentDesc<'a, B: Backend> {
+#[derive(Clone, Debug)]
+pub(crate) struct DepthStencilAttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) view: AttachmentImageViews<'a, B>,
+    pub(crate) view: AttachmentImageViews,
     pub(crate) clear: Option<ClearDepthStencil>,
 }

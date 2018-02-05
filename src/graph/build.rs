@@ -38,6 +38,8 @@ pub enum GraphBuildError<E> {
     BackbufferNotSet,
     /// Allocation errors as returned by the `allocator` function given to `GraphBuilder::build`
     AllocationError(E),
+    /// Graph configuration is invalid.
+    InvalidConfiguaration,
     /// Any other errors encountered during graph building
     Other,
 }
@@ -80,6 +82,7 @@ where
                 fmt.write_str("Presentation attachment wasn't set in GraphBuilder")
             }
             GraphBuildError::AllocationError(ref error) => write!(fmt, "{}", error),
+            GraphBuildError::InvalidConfiguaration => write!(fmt, "Graph has invalid configuration"),
             GraphBuildError::Other => fmt.write_str("Unknown error has occured"),
         }
     }
@@ -323,19 +326,17 @@ where
             let inputs = pass.inputs
                 .iter()
                 .map(|input| {
-                    let input = input.unwrap();
-                    let (ref indices, ref written) = *match input {
-                        Attachment::Color(color) => &color_targets[&color.ptr()],
-                        Attachment::DepthStencil(depth_stencil) => {
+                    let (ref indices, ref written) = *match *input {
+                        Attachment::Color(ref color) => &color_targets[&color.ptr()],
+                        Attachment::DepthStencil(ref depth_stencil) => {
                             &depth_stencil_targets[&depth_stencil.ptr()]
                         }
                     };
                     let indices = indices.clone();
                     debug_assert!(*written > 0);
-                    let ref view = image_views[indices];
                     InputAttachmentDesc {
                         format: input.format(),
-                        view,
+                        view: indices,
                     }
                 })
                 .collect::<Vec<_>>();
@@ -344,8 +345,7 @@ where
             let colors = pass.colors
                 .iter()
                 .enumerate()
-                .map(|(index, color)| {
-                    let color = color.unwrap();
+                .map(|(index, &color)| {
                     if first_draws_to_surface.is_none() && eq(color, present) {
                         first_draws_to_surface = Some(index);
                     }
@@ -359,7 +359,7 @@ where
                     ColorAttachmentDesc {
                         format: color.format,
                         view: if is_images(backbuffer) {
-                            AttachmentImageViews::Owned(&image_views[indices])
+                            AttachmentImageViews::Owned(indices)
                         } else {
                             AttachmentImageViews::External
                         },
@@ -369,19 +369,18 @@ where
                 .collect::<Vec<_>>();
 
             info!("Collect depth-stencil targets");
-            let depth_stencil = pass.depth_stencil.clone().map(|(depth, _stencil)| {
-                let depth = depth.unwrap();
+            let depth_stencil = pass.depth_stencil.clone().map(|depth_stencil| {
                 let (ref indices, ref mut written) =
-                    *depth_stencil_targets.get_mut(&depth.ptr()).unwrap();
+                    *depth_stencil_targets.get_mut(&depth_stencil.ptr()).unwrap();
                 let indices = indices.clone();
-                let clear = if *written == 0 { depth.clear } else { None };
+                let clear = if *written == 0 { depth_stencil.clear } else { None };
 
                 *written += 1;
 
                 DepthStencilAttachmentDesc {
-                    format: depth.format,
+                    format: depth_stencil.format,
                     view: if is_images(backbuffer) {
-                        AttachmentImageViews::Owned(&image_views[indices])
+                        AttachmentImageViews::Owned(indices)
                     } else {
                         AttachmentImageViews::External
                     },
@@ -390,7 +389,7 @@ where
             });
 
             let mut node =
-                pass.build(device, &inputs[..], &colors[..], depth_stencil, self.extent)?;
+                pass.build(device, &[], &inputs, &colors, depth_stencil, self.extent, &image_views)?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -493,7 +492,7 @@ where
 {
     let mut attachments = Vec::new();
     for pass in passes {
-        attachments.extend(pass.colors.iter().cloned().map(Option::unwrap));
+        attachments.extend(pass.colors.iter().cloned());
     }
     attachments.sort_by_key(|a| a as *const _);
     attachments.dedup_by_key(|a| a as *const _);
@@ -509,7 +508,7 @@ where
 {
     let mut attachments = Vec::new();
     for pass in passes {
-        attachments.extend(pass.depth_stencil.as_ref().map(|&(a, _)| a.unwrap()));
+        attachments.extend(pass.depth_stencil.as_ref());
     }
     attachments.sort_by_key(|a| a as *const _);
     attachments.dedup_by_key(|a| a as *const _);
@@ -565,7 +564,6 @@ where
 {
     let mut deps = Vec::new();
     for input in &pass.inputs {
-        let input = input.unwrap();
         deps.extend(
             passes
                 .iter()
@@ -574,12 +572,11 @@ where
                     p.1
                         .depth_stencil
                         .as_ref()
-                        .map(|&(a, _)| input.is(Attachment::DepthStencil(a.unwrap())))
-                        .unwrap_or(false)
+                        .map_or(false, |&a| input.is(Attachment::DepthStencil(a)))
                         || p.1
                             .colors
                             .iter()
-                            .any(|a| input.is(Attachment::Color(a.unwrap())))
+                            .any(|&a| input.is(Attachment::Color(a)))
                 })
                 .map(|p| p.0),
         );
@@ -603,11 +600,11 @@ where
             passes
                 .iter()
                 .enumerate()
-                .filter(|p| p.1.colors.iter().any(|a| eq(a.unwrap(), color.unwrap())))
+                .filter(|p| p.1.colors.iter().any(|&a| eq(a, color)))
                 .map(|p| p.0),
         );
     }
-    if let Some((Some(depth), _)) = pass.depth_stencil {
+    if let Some(depth_stencil) = pass.depth_stencil {
         siblings.extend(
             passes
                 .iter()
@@ -616,8 +613,7 @@ where
                     p.1
                         .depth_stencil
                         .as_ref()
-                        .map(|&(a, _)| eq(a.unwrap(), depth))
-                        .unwrap_or(false)
+                        .map_or(false, |&a| eq(a, depth_stencil))
                 })
                 .map(|p| p.0),
         );

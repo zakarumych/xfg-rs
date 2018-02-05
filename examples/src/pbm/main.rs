@@ -175,6 +175,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
+        _frame: usize,
         scene: &mut Scene<B, ObjectData>,
     )
     {
@@ -251,6 +252,8 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
+        _inputs: &[&B::ImageView],
+        _frame: usize,
         scene: &Scene<B, ObjectData>,
     ) {
         for object in &scene.objects {
@@ -290,8 +293,8 @@ where
     depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
 
     let pass = DrawPbm.build()
-        .with_color(0, colors.last().unwrap())
-        .with_depth(depths.last().unwrap());
+        .with_color(colors.last().unwrap())
+        .with_depth_stencil(depths.last().unwrap());
 
     GraphBuilder::new()
         .with_pass(pass)

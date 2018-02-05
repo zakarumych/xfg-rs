@@ -24,9 +24,10 @@ use pass::{Pass, PassNode};
 #[derive(Derivative)]
 #[derivative(Debug(bound = ""))]
 pub struct PassBuilder<'a, B: Backend, T> {
-    pub(crate) inputs: Vec<Option<Attachment<'a>>>,
-    pub(crate) colors: Vec<Option<&'a ColorAttachment>>,
-    pub(crate) depth_stencil: Option<(Option<&'a DepthStencilAttachment>, bool)>,
+    pub(crate) sampled: Vec<Attachment<'a>>,
+    pub(crate) inputs: Vec<Attachment<'a>>,
+    pub(crate) colors: Vec<&'a ColorAttachment>,
+    pub(crate) depth_stencil: Option<&'a DepthStencilAttachment>,
     rasterizer: pso::Rasterizer,
     primitive: Primitive,
     pass: Box<Pass<B, T>>,
@@ -42,65 +43,83 @@ where
         P: Pass<B, T> + 'static,
     {
         PassBuilder {
-            inputs: vec![None; pass.inputs()],
-            colors: vec![None; pass.colors()],
-            depth_stencil: if pass.depth() {
-                Some((None, pass.stencil()))
-            } else {
-                None
-            },
+            sampled: Vec::new(),
+            inputs: Vec::new(),
+            colors: Vec::new(),
+            depth_stencil: None,
             rasterizer: pso::Rasterizer::FILL,
             primitive: Primitive::TriangleList,
             pass: Box::new(pass),
         }
     }
 
-    /// Set the input attachment for the given index.
+    /// Add the sampled attachment.
     ///
     /// ### Parameters:
     ///
-    /// - `index`: index into the inner pass required input attachments
     /// - `input`: the input attachment to use
-    pub fn with_input<I>(mut self, index: usize, input: I) -> Self
+    pub fn with_input_sampled<I>(mut self, input: I) -> Self
     where
         I: Into<Attachment<'a>>,
     {
-        self.set_input(index, input);
+        self.add_input_sampled(input);
         self
     }
 
-    /// Set the input attachment for the given index.
+    /// Add the sampled attachment.
     ///
     /// ### Parameters:
     ///
-    /// - `index`: index into the inner pass required input attachments
     /// - `input`: the input attachment to use
-    pub fn set_input<I>(&mut self, index: usize, input: I)
+    pub fn add_input_sampled<I>(&mut self, input: I)
     where
         I: Into<Attachment<'a>>,
     {
-        self.inputs[index] = Some(input.into());
+        self.inputs.push(input.into());
     }
 
-    /// Set the color attachment for the given index.
+    /// Add the input attachment.
     ///
     /// ### Parameters:
     ///
-    /// - `index`: index into the inner pass required color attachments
-    /// - `color`: the color attachment to use
-    pub fn with_color(mut self, index: usize, color: &'a ColorAttachment) -> Self {
-        self.set_color(index, color);
+    /// - `input`: the input attachment to use
+    pub fn with_input<I>(mut self, input: I) -> Self
+    where
+        I: Into<Attachment<'a>>,
+    {
+        self.add_input(input);
         self
     }
 
-    /// Set the color attachment for the given index.
+    /// Add the input attachment.
     ///
     /// ### Parameters:
     ///
-    /// - `index`: index into the inner pass required color attachments
+    /// - `input`: the input attachment to use
+    pub fn add_input<I>(&mut self, input: I)
+    where
+        I: Into<Attachment<'a>>,
+    {
+        self.inputs.push(input.into());
+    }
+
+    /// Add the color attachment.
+    ///
+    /// ### Parameters:
+    ///
     /// - `color`: the color attachment to use
-    pub fn set_color(&mut self, index: usize, color: &'a ColorAttachment) {
-        self.colors[index] = Some(color);
+    pub fn with_color(mut self, color: &'a ColorAttachment) -> Self {
+        self.add_color(color);
+        self
+    }
+
+    /// Add the color attachment.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `color`: the color attachment to use
+    pub fn add_color(&mut self, color: &'a ColorAttachment) {
+        self.colors.push(color);
     }
 
     /// Set the depth stencil attachment to use for the pass.
@@ -110,8 +129,8 @@ where
     /// ### Parameters:
     ///
     /// - `depth_stencil`: depth stencil attachment to use
-    pub fn with_depth(mut self, depth_stencil: &'a DepthStencilAttachment) -> Self {
-        self.set_depth(depth_stencil);
+    pub fn with_depth_stencil(mut self, depth_stencil: &'a DepthStencilAttachment) -> Self {
+        self.set_depth_stencil(depth_stencil);
         self
     }
 
@@ -122,21 +141,20 @@ where
     /// ### Parameters:
     ///
     /// - `depth_stencil`: depth stencil attachment to use
-    pub fn set_depth(&mut self, depth_stencil: &'a DepthStencilAttachment) {
-        match self.depth_stencil {
-            Some((ref mut attachment, _)) => *attachment = Some(depth_stencil),
-            None => {}
-        }
+    pub fn set_depth_stencil(&mut self, depth_stencil: &'a DepthStencilAttachment) {
+        self.depth_stencil = Some(depth_stencil);
     }
 
     /// Build the `PassNode` that will be added to the rendering `Graph`.
     pub(crate) fn build<E>(
         self,
         device: &B::Device,
-        inputs: &[InputAttachmentDesc<B>],
-        colors: &[ColorAttachmentDesc<B>],
-        depth_stencil: Option<DepthStencilAttachmentDesc<B>>,
+        sampled: &[InputAttachmentDesc],
+        inputs: &[InputAttachmentDesc],
+        colors: &[ColorAttachmentDesc],
+        depth_stencil: Option<DepthStencilAttachmentDesc>,
         extent: Extent,
+        views: &[B::ImageView],
     ) -> Result<PassNode<B, T>, GraphBuildError<E>> {
         info!("Build pass from {:?}", self);
 
@@ -147,22 +165,31 @@ where
             depth_stencil.is_some(),
             (self.pass.depth() || self.pass.stencil())
         );
+        assert_eq!(self.sampled.len(), sampled.len());
+        assert_eq!(self.inputs.len(), inputs.len());
+        assert_eq!(self.colors.len(), colors.len());
+        assert_eq!(self.depth_stencil.is_some(), depth_stencil.is_some());
 
         assert!(
-            inputs.iter().map(|input| Some(input.format)).eq(self.inputs
+            sampled.iter().map(|input| input.format).eq(self.sampled
                 .iter()
-                .map(|input| input.map(|input| input.format())))
+                .map(|input| input.format()))
         );
         assert!(
-            colors.iter().map(|color| Some(color.format)).eq(self.colors
+            inputs.iter().map(|input| input.format).eq(self.inputs
                 .iter()
-                .map(|color| color.map(|color| color.format)))
+                .map(|input| input.format()))
+        );
+        assert!(
+            colors.iter().map(|color| color.format).eq(self.colors
+                .iter()
+                .map(|color| color.format))
         );
         assert_eq!(
-            depth_stencil.as_ref().map(|depth| Some(depth.format)),
+            depth_stencil.as_ref().map(|depth_stencil| depth_stencil.format),
             self.depth_stencil
                 .as_ref()
-                .map(|depth| depth.0.map(|depth| depth.format))
+                .map(|depth_stencil| depth_stencil.format)
         );
 
         // Construct `RenderPass`
@@ -362,7 +389,7 @@ where
 
         // create framebuffers
         let framebuffer: SuperFramebuffer<B> = {
-            if colors.len() == 1 && match colors[0].view {
+            if inputs.len() == 0 && colors.len() == 1 && match colors[0].view {
                 AttachmentImageViews::External => true,
                 _ => false,
             } {
@@ -370,23 +397,29 @@ where
             } else {
                 let mut frames = None;
 
-                colors
-                    .iter()
-                    .map(|c| &c.view)
-                    .chain(depth_stencil.iter().map(|ds| &ds.view))
-                    .map(|view| match *view {
-                        AttachmentImageViews::Owned(ref images) => images,
+                for input in inputs {
+                    let images = input.view.clone();
+                    let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
+                    assert_eq!(frames.len(), images.len());
+                    for (i, image) in images.enumerate() {
+                        frames[i].push(&views[image]);
+                    }
+                }
+
+                for view in colors.iter().map(|c| c.view.clone())
+                    .chain(depth_stencil.iter().map(|ds| ds.view.clone())) {
+                    let images = match view {
+                        AttachmentImageViews::Owned(ref images) => images.clone(),
                         AttachmentImageViews::External => {
-                            panic!("External framebuffer isn't valid for multicolor output")
+                            return Err(GraphBuildError::InvalidConfiguaration);
                         }
-                    })
-                    .for_each(|images| {
-                        let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
-                        assert_eq!(frames.len(), images.len());
-                        for i in 0..images.len() {
-                            frames[i].push(&images[i]);
-                        }
-                    });
+                    };
+                    let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
+                    assert_eq!(frames.len(), images.len());
+                    for (i, image) in images.enumerate() {
+                        frames[i].push(&views[image]);
+                    }
+                }
 
                 let frames = frames.unwrap_or(vec![]);
 
@@ -406,6 +439,8 @@ where
             }
         };
 
+        let inputs = sampled.iter().chain(inputs).map(|i| i.view.clone()).collect();
+
         debug!("Framebuffer: {:?}", framebuffer);
 
         Ok(PassNode {
@@ -417,6 +452,7 @@ where
             framebuffer,
             pass: self.pass,
             depends: None,
+            inputs,
         })
     }
 }

@@ -29,6 +29,14 @@ where
             Backbuffer::Framebuffer(ref single) => SuperFrame::Buffer(single),
         }
     }
+
+    /// Get index of the frame
+    pub fn index(&self) -> usize {
+        match *self {
+            SuperFrame::Index(index) => index,
+            SuperFrame::Buffer(_) => 0,
+        }
+    }
 }
 
 /// Framebuffer wrapper
@@ -44,7 +52,7 @@ pub enum SuperFramebuffer<B: Backend> {
 /// Pick the correct framebuffer
 pub fn pick<'a, B>(
     framebuffer: &'a SuperFramebuffer<B>,
-    frame: SuperFrame<'a, B>,
+    frame: &SuperFrame<'a, B>,
 ) -> &'a B::Framebuffer
 where
     B: Backend,
@@ -52,9 +60,8 @@ where
     use self::SuperFrame::*;
     use self::SuperFramebuffer::*;
     match (framebuffer, frame) {
-        (&Owned(ref framebuffers), Index(index)) => &framebuffers[index],
-        (&Owned(ref framebuffers), Buffer(_)) => &framebuffers[0],
-        (&External, Buffer(ref framebuffer)) => framebuffer,
+        (&Owned(ref framebuffers), ref frame) => &framebuffers[frame.index()],
+        (&External, &Buffer(ref framebuffer)) => framebuffer,
         _ => unreachable!("This combination can't happen"),
     }
 }
