@@ -75,7 +75,7 @@ where
     where
         I: Into<Attachment<'a>>,
     {
-        self.inputs.push(input.into());
+        self.sampled.push(input.into());
     }
 
     /// Add the input attachment.
@@ -292,6 +292,25 @@ where
                 preserves: &[],
             };
 
+            let dependencies = vec![
+                pass::SubpassDependency {
+                    passes: pass::SubpassRef::External .. pass::SubpassRef::Pass(0),
+                    stages: pso::PipelineStage::BOTTOM_OF_PIPE .. pso::PipelineStage::TOP_OF_PIPE,
+                    accesses: 
+                        image::Access::COLOR_ATTACHMENT_WRITE | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE
+                        ..
+                        image::Access::SHADER_READ | image::Access::INPUT_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_WRITE | image::Access::DEPTH_STENCIL_ATTACHMENT_READ | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE
+                },
+                pass::SubpassDependency {
+                    passes: pass::SubpassRef::Pass(0) .. pass::SubpassRef::External,
+                    stages: pso::PipelineStage::BOTTOM_OF_PIPE .. pso::PipelineStage::TOP_OF_PIPE,
+                    accesses: 
+                        image::Access::COLOR_ATTACHMENT_WRITE | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE
+                        ..
+                        image::Access::SHADER_READ | image::Access::MEMORY_READ | image::Access::INPUT_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_WRITE | image::Access::DEPTH_STENCIL_ATTACHMENT_READ | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE
+                },
+            ];
+
             info!("Create randerpass");
             let renderpass = device.create_render_pass(
                 &inputs
@@ -299,7 +318,7 @@ where
                     .chain(depth_stencil)
                     .collect::<Vec<_>>(),
                 &[subpass],
-                &[], // TODO: Add external subpass dependency
+                &dependencies,
             );
 
             debug!("Randerpass: {:?}", renderpass);
