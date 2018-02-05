@@ -111,8 +111,8 @@ where
             cbuf.set_scissors(&[viewport.rect]);
 
             // Record commands for pass
-            pass.prepare(&mut cbuf, device, frame.index(), aux);
-            pass.draw_inline(&mut cbuf, viewport.rect, frame.clone(), device, aux);
+            pass.prepare(&mut cbuf, device, frame, aux);
+            pass.draw_inline(&mut cbuf, device, viewport.rect, frame, aux);
 
             {
                 // If it renders to acquired image

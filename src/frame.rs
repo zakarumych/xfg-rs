@@ -7,7 +7,7 @@ use gfx_hal::window::{Backbuffer, Frame};
 ///
 /// - `B`: hal `Backend`
 #[derive(Derivative)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Copy, Debug)]
 pub enum SuperFrame<'a, B: Backend> {
     /// Index to one of multiple `Framebuffer`s created by the graph.
     Index(usize),

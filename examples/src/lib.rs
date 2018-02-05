@@ -58,13 +58,13 @@ pub struct Object<B: Backend, T = ()> {
     pub mesh: Arc<Mesh<B>>,
     pub transform: Matrix4<f32>,
     pub data: T,
-    pub cache: Option<Cache<B>>,
+    pub cache: Vec<Cache<B>>,
 }
 
 pub struct Light<B: Backend> {
     pub color: [f32; 3],
     pub transform: Matrix4<f32>,
-    pub cache: Option<Cache<B>>,
+    pub cache: Vec<Cache<B>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,17 +147,15 @@ where
     let surface_format = surface
         .capabilities_and_formats(&adapter.physical_device)
         .1
-        .map_or(
-            Format::Rgba8Srgb,
+        .and_then(
             |formats| {
                 formats
                     .into_iter()
                     .find(|format| {
                         format.base_format().1 == ChannelType::Srgb
                     })
-                    .unwrap()
             }
-        );
+        ).unwrap_or(Format::Rgba8Srgb);
 
     let memory_properties = adapter
         .physical_device

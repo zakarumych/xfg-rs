@@ -120,7 +120,8 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
-        _frame: usize,
+        _inputs: &[&B::ImageView],
+        frame: usize,
         scene: &mut Scene<B>,
     )
     {
@@ -135,7 +136,7 @@ where
                 view,
             };
 
-            let cache = obj.cache.get_or_insert_with(|| {
+            let grow = (obj.cache.len() .. frame + 1).map(|_| {
                 let size = ::std::mem::size_of::<TrProjView>() as u64;
                 let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
                 let set = pool.allocate(device);
@@ -150,7 +151,8 @@ where
                     set,
                 }
             });
-            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
+            obj.cache.extend(grow);
+            cbuf.update_buffer(obj.cache[frame].uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
         }
     }
 
@@ -160,12 +162,11 @@ where
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
         _inputs: &[&B::ImageView],
-        _frame: usize,
+        frame: usize,
         scene: &Scene<B>,
     ) {       
         for object in &scene.objects {
-            let cache = object.cache.as_ref().unwrap();
-            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&cache.set));
+            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].set));
             encoder.bind_index_buffer(IndexBufferView {
                 buffer: object.mesh.indices.borrow(),
                 offset: 0,
@@ -182,7 +183,7 @@ where
 
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, scene: &mut Scene<B>) {
         for object in &mut scene.objects {
-            if let Some(cache) = object.cache.take() {
+            for cache in object.cache.drain(..) {
                 pool.free(cache.set);
                 for uniform in cache.uniforms {
                     scene.allocator.destroy_buffer(device, uniform);
@@ -396,7 +397,7 @@ where
         mesh: Arc::new(cube),
         transform: Matrix4::one(),
         data: (),
-        cache: None,
+        cache: Vec::new(),
     }];
 }
 

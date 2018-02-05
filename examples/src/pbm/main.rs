@@ -175,7 +175,8 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
-        _frame: usize,
+        _inputs: &[&B::ImageView],
+        frame: usize,
         scene: &mut Scene<B, ObjectData>,
     )
     {
@@ -215,7 +216,7 @@ where
             let fragment_args_size = ::std::mem::size_of::<FragmentArgs>() as u64;
             let size = vertex_args_size + fragment_args_size;
 
-            let cache = obj.cache.get_or_insert_with(|| {
+            let grow = (obj.cache.len() .. frame + 1).map(|_| {
                 let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
@@ -241,9 +242,9 @@ where
                     set,
                 }
             });
-
-            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[vertex_args]));
-            cbuf.update_buffer(cache.uniforms[0].borrow(), vertex_args_size, cast_slice(&[fragment_args]));
+            obj.cache.extend(grow);
+            cbuf.update_buffer(obj.cache[frame].uniforms[0].borrow(), 0, cast_slice(&[vertex_args]));
+            cbuf.update_buffer(obj.cache[frame].uniforms[0].borrow(), vertex_args_size, cast_slice(&[fragment_args]));
         }
     }
 
@@ -253,12 +254,11 @@ where
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
         _inputs: &[&B::ImageView],
-        _frame: usize,
+        frame: usize,
         scene: &Scene<B, ObjectData>,
     ) {
         for object in &scene.objects {
-            let cache = object.cache.as_ref().unwrap();
-            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&cache.set));
+            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].set));
             encoder.bind_index_buffer(IndexBufferView {
                 buffer: object.mesh.indices.borrow(),
                 offset: 0,
@@ -275,7 +275,7 @@ where
 
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, scene: &mut Scene<B, ObjectData>) {
         for object in &mut scene.objects {
-            if let Some(cache) = object.cache.take() {
+            for cache in object.cache.drain(..) {
                 pool.free(cache.set);
                 for uniform in cache.uniforms {
                     scene.allocator.destroy_buffer(device, uniform);
@@ -326,24 +326,40 @@ where
                 mesh: sphere.clone(),
                 data,
                 transform,
-                cache: None,
+                cache: Vec::new(),
             });
         }
     }
 
     scene.lights.push(
         Light {
-            color: [2.0, 0.0, 0.0],
-            transform: Matrix4::from_translation([2.0, 7.0, 10.0].into()),
-            cache: None,
+            color: [0.0, 0.623529411764706, 0.419607843137255],
+            transform: Matrix4::from_translation([-6.25, -6.25, 10.0].into()),
+            cache: Vec::new(),
         }
     );
 
     scene.lights.push(
         Light {
-            color: [0.0, 0.0, 2.0],
-            transform: Matrix4::from_translation([-7.0, 2.0, 10.0].into()),
-            cache: None,
+            color: [0.768627450980392, 0.007843137254902, 0.2],
+            transform: Matrix4::from_translation([6.25, -6.25, 10.0].into()),
+            cache: Vec::new(),
+        }
+    );
+
+    scene.lights.push(
+        Light {
+            color: [1.0, 0.827450980392157, 0.0],
+            transform: Matrix4::from_translation([-6.25, 6.25, 10.0].into()),
+            cache: Vec::new(),
+        }
+    );
+
+    scene.lights.push(
+        Light {
+            color: [0.0, 0.529411764705882, 0.741176470588235],
+            transform: Matrix4::from_translation([6.25, 6.25, 10.0].into()),
+            cache: Vec::new(),
         }
     );
 }

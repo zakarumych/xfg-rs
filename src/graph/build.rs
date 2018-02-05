@@ -322,6 +322,25 @@ where
         let mut first_draws_to_surface = None;
 
         for (pass, last_dep) in passes.into_iter().zip(deps) {
+            info!("Collect samped inputs");
+            let sampled = pass.sampled
+                .iter()
+                .map(|input| {
+                    let (ref indices, ref written) = *match *input {
+                        Attachment::Color(ref color) => &color_targets[&color.ptr()],
+                        Attachment::DepthStencil(ref depth_stencil) => {
+                            &depth_stencil_targets[&depth_stencil.ptr()]
+                        }
+                    };
+                    let indices = indices.clone();
+                    debug_assert!(*written > 0);
+                    InputAttachmentDesc {
+                        format: input.format(),
+                        view: indices,
+                    }
+                })
+                .collect::<Vec<_>>();
+
             info!("Collect input targets");
             let inputs = pass.inputs
                 .iter()
@@ -389,7 +408,7 @@ where
             });
 
             let mut node =
-                pass.build(device, &[], &inputs, &colors, depth_stencil, self.extent, &image_views)?;
+                pass.build(device, &sampled, &inputs, &colors, depth_stencil, self.extent, &image_views)?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -563,7 +582,7 @@ where
     B: Backend,
 {
     let mut deps = Vec::new();
-    for input in &pass.inputs {
+    for input in pass.inputs.iter().chain(&pass.sampled) {
         deps.extend(
             passes
                 .iter()

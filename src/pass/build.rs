@@ -58,11 +58,11 @@ where
     /// ### Parameters:
     ///
     /// - `input`: the input attachment to use
-    pub fn with_input_sampled<I>(mut self, input: I) -> Self
+    pub fn with_sampled<I>(mut self, input: I) -> Self
     where
         I: Into<Attachment<'a>>,
     {
-        self.add_input_sampled(input);
+        self.add_sampled(input);
         self
     }
 
@@ -71,7 +71,7 @@ where
     /// ### Parameters:
     ///
     /// - `input`: the input attachment to use
-    pub fn add_input_sampled<I>(&mut self, input: I)
+    pub fn add_sampled<I>(&mut self, input: I)
     where
         I: Into<Attachment<'a>>,
     {
@@ -422,8 +422,6 @@ where
                 }
 
                 let frames = frames.unwrap_or(vec![]);
-
-                // transpose frame matrix
                 if frames.len() > 1 {
                     assert!(
                         frames[1..]
@@ -439,7 +437,18 @@ where
             }
         };
 
-        let inputs = sampled.iter().chain(inputs).map(|i| i.view.clone()).collect();
+        let inputs = {
+            let mut frames = None;
+            for input in sampled.into_iter().chain(inputs) {
+                let images = input.view.clone();
+                let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
+                assert_eq!(frames.len(), images.len());
+                for (i, image) in images.enumerate() {
+                    frames[i].push(&views[image] as *const _);
+                }
+            }
+            frames.unwrap_or(vec![])
+        };
 
         debug!("Framebuffer: {:?}", framebuffer);
 

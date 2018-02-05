@@ -3,7 +3,6 @@
 pub use self::build::PassBuilder;
 
 use std::fmt::Debug;
-use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
@@ -111,6 +110,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
+        inputs: &[&B::ImageView],
         frame: usize,
         aux: &mut T,
     );
@@ -164,8 +164,8 @@ pub(crate) struct PassNode<B: Backend, T> {
     renderpass: B::RenderPass,
     framebuffer: SuperFramebuffer<B>,
     pass: Box<Pass<B, T>>,
+    inputs: Vec<Vec<*const B::ImageView>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
-    pub(crate) inputs: Vec<Range<usize>>,
 }
 
 impl<B, T> PassNode<B, T>
@@ -186,16 +186,26 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn prepare<C>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, frame: usize, aux: &mut T)
+    pub fn prepare<C>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, frame: SuperFrame<B>, aux: &mut T)
     where
         C: Supports<Transfer>,
     {
+        // Collecting those seems too slow.
+        // This is safe due to `ImageView`s must be alive as long as whole
+        // `Graph` is.
+        let inputs = unsafe {
+            self.inputs.get(frame.index()).map_or(&[][..], |inputs| {
+                let inputs: &[*const B::ImageView] = &inputs[..];
+                ::std::mem::transmute(inputs)
+            })
+        };
+
         // Run custom preparation
         // * Write descriptor sets
         // * Store caches
         // * Bind pipeline layout with descriptors sets
         self.pass
-            .prepare(&mut self.descriptors, cbuf.downgrade(), device, frame, aux);
+            .prepare(&mut self.descriptors, cbuf.downgrade(), device, inputs, frame.index(), aux);
     }
 
     /// Binds pipeline and renderpass to the command buffer `cbuf`.
@@ -215,9 +225,9 @@ where
     pub fn draw_inline<C>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
+        device: &B::Device,
         rect: Rect,
         frame: SuperFrame<B>,
-        device: &B::Device,
         aux: &T,
     ) where
         C: Supports<Graphics>,
@@ -235,9 +245,19 @@ where
             )
         };
 
+        // Collecting those seems too slow.
+        // This is safe due to `ImageView`s must be alive as long as whole
+        // `Graph` is.
+        let inputs = unsafe {
+            self.inputs.get(frame.index()).map_or(&[][..], |inputs| {
+                let inputs: &[*const B::ImageView] = &inputs[..];
+                ::std::mem::transmute(inputs)
+            })
+        };
+
         // Record custom drawing calls
         self.pass
-            .draw_inline(&self.pipeline_layout, encoder, device, &[], frame.index(), aux);
+            .draw_inline(&self.pipeline_layout, encoder, device, inputs, frame.index(), aux);
     }
 
     /// Dispose of all internal data created by the pass.
