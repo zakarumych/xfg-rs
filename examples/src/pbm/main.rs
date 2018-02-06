@@ -8,6 +8,7 @@ extern crate xfg_examples;
 use xfg_examples::*;
 
 use std::borrow::Borrow;
+use std::ops::{Add, Sub, BitOr};
 use std::sync::Arc;
 
 use cgmath::{Deg, PerspectiveFov, Transform, Matrix4, EuclideanSpace, Point3};
@@ -212,14 +213,15 @@ where
                 roughness: obj.data.roughness,
             };
             
-            let vertex_args_size = ::std::mem::size_of::<VertexArgs>() as u64;
-            let fragment_args_size = ::std::mem::size_of::<FragmentArgs>() as u64;
-            let size = vertex_args_size + fragment_args_size;
+            let vertex_args_range = 0 .. ::std::mem::size_of::<VertexArgs>() as u64;
+            let fragment_args_offset = shift_for_alignment(256, vertex_args_range.end);
+            let fragment_args_range = fragment_args_offset .. fragment_args_offset + ::std::mem::size_of::<FragmentArgs>() as u64;
 
             let grow = (obj.cache.len() .. frame + 1).map(|_| None);
-            obj.cache.extend(grow);            
+            obj.cache.extend(grow);
             let cache = obj.cache[frame].get_or_insert_with(|| {
-                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
+                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, fragment_args_range.end, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
+                println!("Uniform buffer: {:#?}. Vertex: {:#?}, Fragment: {:#?}", buffer, vertex_args_range.clone(), fragment_args_range.clone());
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
                     DescriptorSetWrite {
@@ -227,7 +229,7 @@ where
                         binding: 0,
                         array_offset: 0,
                         write: DescriptorWrite::UniformBuffer(vec![
-                            (buffer.borrow(), 0 .. vertex_args_size)
+                            (buffer.borrow(), vertex_args_range.clone())
                         ]),
                     },
                     DescriptorSetWrite {
@@ -235,7 +237,7 @@ where
                         binding: 1,
                         array_offset: 0,
                         write: DescriptorWrite::UniformBuffer(vec![
-                            (buffer.borrow(), vertex_args_size .. size)
+                            (buffer.borrow(), fragment_args_range.clone())
                         ]),
                     },
                 ]);
@@ -245,8 +247,8 @@ where
                     set,
                 }
             });
-            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[vertex_args]));
-            cbuf.update_buffer(cache.uniforms[0].borrow(), vertex_args_size, cast_slice(&[fragment_args]));
+            cbuf.update_buffer(cache.uniforms[0].borrow(), vertex_args_range.start, cast_slice(&[vertex_args]));
+            cbuf.update_buffer(cache.uniforms[0].borrow(), fragment_args_range.start, cast_slice(&[fragment_args]));
         }
     }
 
@@ -428,5 +430,16 @@ where
         vertices,
         indices,
         index_count,
+    }
+}
+
+fn shift_for_alignment<T>(alignment: T, offset: T) -> T
+where
+    T: From<u8> + Add<Output=T> + Sub<Output=T> + BitOr<Output=T> + PartialOrd,
+{
+    if offset > 0.into() && alignment > 0.into() {
+        ((offset - 1.into()) | (alignment - 1.into())) + 1.into()
+    } else {
+        offset
     }
 }

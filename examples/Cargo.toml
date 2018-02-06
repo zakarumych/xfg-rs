@@ -15,6 +15,7 @@ gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+log = "0.4"
 xfg = { path = ".." }
 smallvec = "0.4"
 winit = "0.10"

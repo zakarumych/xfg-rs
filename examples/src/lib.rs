@@ -4,6 +4,7 @@ pub extern crate gfx_hal;
 pub extern crate gfx_mem;
 pub extern crate xfg;
 
+#[macro_use] extern crate log;
 extern crate env_logger;
 extern crate winit;
 
@@ -87,7 +88,8 @@ pub struct Scene<B: Backend, T = ()> {
 
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
 pub fn run<T, Y>(_: T, _: Y) {
-    println!("You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example");
+    env_logger::init();
+    error!("You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example");
 }
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
@@ -97,7 +99,6 @@ where
     G: for<'a> FnOnce(Format, &'a mut Vec<ColorAttachment>, &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, back::Backend, Scene<back::Backend, T>>,
     F: FnOnce(&mut Scene<back::Backend, T>, &<back::Backend as Backend>::Device),
 {
-
     env_logger::init();
 
     #[cfg(feature = "metal")]
@@ -127,7 +128,7 @@ where
 
     let (width, height) = window.get_inner_size().unwrap();
     let hidpi = window.hidpi_factor();
-    println!("Width: {}, Height: {}, HIDPI: {}", width, height, hidpi);
+    info!("Width: {}, Height: {}, HIDPI: {}", width, height, hidpi);
     
     #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
     let (_instance, adapter, mut surface) = {
@@ -163,6 +164,9 @@ where
         .memory_properties();
 
     let mut allocator = SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 1024 * 1024 * 64);
+
+    info!("Device features: {:#?}", adapter.physical_device.get_features());
+    info!("Device limits: {:#?}", adapter.physical_device.get_limits());
 
     let (device, mut queue_group) =
         adapter.open_with::<_, Graphics>(1, |family| {
@@ -229,14 +233,14 @@ where
     let start = ::std::time::Instant::now();
     let total = 10000;
     for _ in 0 .. total {
-        // println!("Iteration: {}", i);
-        // println!("Poll events");
+        // info!("Iteration: {}", i);
+        // info!("Poll events");
         events_loop.poll_events(|_| ());
 
         // There is always one unused.
         let acquire = acquires.pop().unwrap();
 
-        // println!("Acquire frame");
+        // info!("Acquire frame");
         let frame = swap_chain.acquire_frame(FrameSync::Semaphore(&acquire));
         let id = frame.id();
 
@@ -318,9 +322,9 @@ where
     let end = ::std::time::Instant::now();
     let dur = end - start;
     let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1000000000f64);
-    println!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
-    println!("Total frames rendered: {}", total);
-    println!("Average FPS: {}", fps);
+    info!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
+    info!("Total frames rendered: {}", total);
+    info!("Average FPS: {}", fps);
 
     // TODO: Dispose everything properly.
     ::std::process::exit(0);
