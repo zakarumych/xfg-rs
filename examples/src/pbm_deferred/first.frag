@@ -22,6 +22,6 @@ layout(location = 3) out vec4 position_depth;
 void main() {
     albedo_roughness = vec4(albedo, roughness);
     emission_metallic = vec4(emission, metallic);
-    normal_ambient_occlusion = vec4(vertex.normal.xyz, ambient_occlusion);
+    normal_ambient_occlusion = vec4(vertex.normal, ambient_occlusion);
     position_depth = vec4(vertex.position, gl_FragCoord.z);
 }

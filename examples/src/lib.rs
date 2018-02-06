@@ -45,6 +45,7 @@ pub const REQUEST_CPU_VISIBLE: (Type, Properties) = (Type::General, Properties::
 
 pub struct Cache<B: Backend> {
     pub uniforms: Vec<Buffer<B>>,
+    pub views: Vec<B::ImageView>,
     pub set: B::DescriptorSet,
 }
 

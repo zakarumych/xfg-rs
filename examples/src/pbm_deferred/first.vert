@@ -16,9 +16,8 @@ layout(location = 0) out VertexData {
 } vertex;
 
 void main() {
-    mat4 proj_view = proj * view;
     vertex.normal = mat3(model) * normal;
     vec4 position = model * vec4(position, 1.0);
     vertex.position = vec3(position);
-    gl_Position = proj_view * position;
+    gl_Position = proj * view * position;
 }

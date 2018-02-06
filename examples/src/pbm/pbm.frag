@@ -91,5 +91,5 @@ void main() {
     vec3 ambient = ambient_light * albedo * ambient_occlusion;
     vec3 color = ambient + lighted + emission;
    
-    out_color = vec4(color, 1.0);
+    out_color = vec4(vertex.normal.xyz, 1.0);
 }

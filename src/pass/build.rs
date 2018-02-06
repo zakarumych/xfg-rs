@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearValue};
 use gfx_hal::device::Extent;
@@ -8,7 +10,7 @@ use gfx_hal::pso;
 
 use smallvec::SmallVec;
 
-use attachment::{Attachment, AttachmentImageViews, ColorAttachment, ColorAttachmentDesc,
+use attachment::{Attachment, ColorAttachment, ColorAttachmentDesc,
                  DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
 use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
@@ -145,8 +147,13 @@ where
         self.depth_stencil = Some(depth_stencil);
     }
 
+    /// Get name of the `Pass`.
+    pub(crate) fn name(&self) -> &str {
+        self.pass.name()
+    }
+
     /// Build the `PassNode` that will be added to the rendering `Graph`.
-    pub(crate) fn build<E>(
+    pub(crate) fn build<E, I>(
         self,
         device: &B::Device,
         sampled: &[InputAttachmentDesc],
@@ -155,7 +162,11 @@ where
         depth_stencil: Option<DepthStencilAttachmentDesc>,
         extent: Extent,
         views: &[B::ImageView],
-    ) -> Result<PassNode<B, T>, GraphBuildError<E>> {
+        images: &[I],
+    ) -> Result<PassNode<B, T>, GraphBuildError<E>>
+    where
+        I: Borrow<B::Image>,
+    {
         info!("Build pass from {:?}", self);
 
         // Check attachments
@@ -348,10 +359,9 @@ where
 
             // Default configuration for blending targets for all color targets
             pipeline_desc.blender.targets =
-                vec![
-                    pso::ColorBlendDesc(pso::ColorMask::ALL, pso::BlendState::ALPHA);
-                    self.pass.colors()
-                ];
+                (0 .. self.pass.colors()).map(|i|
+                    self.pass.color_blend(i)
+                ).collect();
 
             // Default configuration for depth-stencil
             pipeline_desc.depth_stencil = Some(pso::DepthStencilDesc {
@@ -408,34 +418,30 @@ where
 
         // create framebuffers
         let framebuffer: SuperFramebuffer<B> = {
-            if inputs.len() == 0 && colors.len() == 1 && match colors[0].view {
-                AttachmentImageViews::External => true,
+            if inputs.len() == 0 && colors.len() == 1 && match colors[0].indices {
+                None => true,
                 _ => false,
             } {
                 SuperFramebuffer::External
             } else {
+                info!("Create framebuffers from:\ninputs: {:#?}\ncolors: {:#?}\ndepth-stencil: {:#?}", inputs, colors, depth_stencil);
                 let mut frames = None;
 
                 for input in inputs {
-                    let images = input.view.clone();
-                    let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
-                    assert_eq!(frames.len(), images.len());
-                    for (i, image) in images.enumerate() {
+                    let indices = input.indices.clone();
+                    let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
+                    assert_eq!(frames.len(), indices.len());
+                    for (i, image) in indices.enumerate() {
                         frames[i].push(&views[image]);
                     }
                 }
 
-                for view in colors.iter().map(|c| c.view.clone())
-                    .chain(depth_stencil.iter().map(|ds| ds.view.clone())) {
-                    let images = match view {
-                        AttachmentImageViews::Owned(ref images) => images.clone(),
-                        AttachmentImageViews::External => {
-                            return Err(GraphBuildError::InvalidConfiguaration);
-                        }
-                    };
-                    let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
-                    assert_eq!(frames.len(), images.len());
-                    for (i, image) in images.enumerate() {
+                for indices in colors.iter().map(|c| c.indices.clone())
+                    .chain(depth_stencil.iter().map(|ds| ds.indices.clone())) {
+                    let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
+                    let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
+                    assert_eq!(frames.len(), indices.len());
+                    for (i, image) in indices.enumerate() {
                         frames[i].push(&views[image]);
                     }
                 }
@@ -457,13 +463,15 @@ where
         };
 
         let inputs = {
+            let offset = views.len() - images.len();
             let mut frames = None;
+            info!("Collect inputs:\nsampeld: {:#?}\nattchment: {:#?}", sampled, inputs);
             for input in sampled.into_iter().chain(inputs) {
-                let images = input.view.clone();
-                let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
-                assert_eq!(frames.len(), images.len());
-                for (i, image) in images.enumerate() {
-                    frames[i].push(&views[image] as *const _);
+                let indices = input.indices.clone();
+                let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
+                assert_eq!(frames.len(), indices.len());
+                for (i, index) in indices.enumerate() {
+                    frames[i].push(images[index - offset].borrow() as *const _);
                 }
             }
             frames.unwrap_or(vec![])

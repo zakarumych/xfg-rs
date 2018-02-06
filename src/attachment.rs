@@ -126,27 +126,21 @@ impl<'a> From<&'a DepthStencilAttachment> for Attachment<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum AttachmentImageViews {
-    Owned(Range<usize>),
-    External,
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct InputAttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) view: Range<usize>,
+    pub(crate) indices: Range<usize>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ColorAttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) view: AttachmentImageViews,
+    pub(crate) indices: Option<Range<usize>>,
     pub(crate) clear: Option<ClearColor>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct DepthStencilAttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) view: AttachmentImageViews,
+    pub(crate) indices: Option<Range<usize>>,
     pub(crate) clear: Option<ClearDepthStencil>,
 }

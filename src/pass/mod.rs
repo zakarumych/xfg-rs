@@ -8,7 +8,7 @@ use gfx_hal::{Backend, Device};
 use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
-use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
+use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
                    PipelineStage};
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
@@ -45,6 +45,11 @@ where
 
     /// Number of colors to write
     fn colors(&self) -> usize;
+
+    /// Blending for color attachment
+    fn color_blend(&self, _index: usize) -> ColorBlendDesc {
+        ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)
+    }
 
     /// Will the pass write to the depth buffer
     fn depth(&self) -> bool;
@@ -110,7 +115,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
-        inputs: &[&B::ImageView],
+        inputs: &[&B::Image],
         frame: usize,
         aux: &mut T,
     );
@@ -131,7 +136,7 @@ where
         layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B, Primary>,
         device: &B::Device,
-        inputs: &[&B::ImageView],
+        inputs: &[&B::Image],
         frame: usize,
         aux: &T,
     );
@@ -164,7 +169,7 @@ pub(crate) struct PassNode<B: Backend, T> {
     renderpass: B::RenderPass,
     framebuffer: SuperFramebuffer<B>,
     pass: Box<Pass<B, T>>,
-    inputs: Vec<Vec<*const B::ImageView>>,
+    inputs: Vec<Vec<*const B::Image>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
 }
 
@@ -191,11 +196,11 @@ where
         C: Supports<Transfer>,
     {
         // Collecting those seems too slow.
-        // This is safe due to `ImageView`s must be alive as long as whole
+        // This is safe due to `Image`s must be alive as long as whole
         // `Graph` is.
         let inputs = unsafe {
             self.inputs.get(frame.index()).map_or(&[][..], |inputs| {
-                let inputs: &[*const B::ImageView] = &inputs[..];
+                let inputs: &[*const B::Image] = &inputs[..];
                 ::std::mem::transmute(inputs)
             })
         };
@@ -246,11 +251,11 @@ where
         };
 
         // Collecting those seems too slow.
-        // This is safe due to `ImageView`s must be alive as long as whole
+        // This is safe due to `Image`s must be alive as long as whole
         // `Graph` is.
         let inputs = unsafe {
             self.inputs.get(frame.index()).map_or(&[][..], |inputs| {
-                let inputs: &[*const B::ImageView] = &inputs[..];
+                let inputs: &[*const B::Image] = &inputs[..];
                 ::std::mem::transmute(inputs)
             })
         };

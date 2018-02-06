@@ -16,10 +16,10 @@ use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, RenderPassInlineEncoder, Primary};
 use gfx_hal::device::ShaderError;
-use gfx_hal::format::Format;
-use gfx_hal::image::ImageLayout;
+use gfx_hal::format::{AspectFlags, Format, Swizzle};
+use gfx_hal::image::{ImageLayout, SubresourceRange};
 use gfx_hal::memory::{cast_slice, Pod};
-use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, DescriptorWrite, Element, ElemStride, EntryPoint, GraphicsShaderSet, ShaderStageFlags, VertexBufferSet};
+use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, DescriptorWrite, Element, ElemStride, EntryPoint, GraphicsShaderSet, ShaderStageFlags, VertexBufferSet};
 use gfx_hal::queue::Transfer;
 use gfx_mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
@@ -137,7 +137,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
-        _inputs: &[&B::ImageView],
+        _inputs: &[&B::Image],
         frame: usize,
         scene: &mut Scene<B, ObjectData>,
     )
@@ -211,6 +211,7 @@ where
                 ]);
                 Cache {
                     uniforms: vec![buffer],
+                    views: vec![],
                     set,
                 }
             });
@@ -224,7 +225,7 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
-        _inputs: &[&B::ImageView],
+        _inputs: &[&B::Image],
         frame: usize,
         scene: &Scene<B, ObjectData>,
     ) {
@@ -274,6 +275,11 @@ where
 
     /// Color attachments
     fn colors(&self) -> usize { 1 }
+    
+    /// Blending for color attachment
+    fn color_blend(&self, _index: usize) -> ColorBlendDesc {
+        ColorBlendDesc(ColorMask::ALL, BlendState::ADD)
+    }
 
     /// Uses depth attachment
     fn depth(&self) -> bool { true }
@@ -352,7 +358,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
-        inputs: &[&B::ImageView],
+        inputs: &[&B::Image],
         frame: usize,
         scene: &mut Scene<B, ObjectData>,
     )
@@ -395,6 +401,17 @@ where
             let grow = (light.cache.len() .. frame + 1).map(|_| None);
             light.cache.extend(grow);
             let cache = light.cache[frame].get_or_insert_with(|| {
+                let color_range = SubresourceRange {
+                    aspects: AspectFlags::COLOR,
+                    levels: 0..1,
+                    layers: 0..1,
+                };
+                let views = vec![
+                    device.create_image_view(inputs[0], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
+                    device.create_image_view(inputs[1], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
+                    device.create_image_view(inputs[2], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
+                    device.create_image_view(inputs[3], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
+                ];
                 let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
@@ -403,7 +420,7 @@ where
                         binding: 0,
                         array_offset: 0,
                         write: DescriptorWrite::StorageImage(vec![
-                            (inputs[0], ImageLayout::General),
+                            (&views[0], ImageLayout::General),
                         ]),
                     },
                     DescriptorSetWrite {
@@ -411,7 +428,7 @@ where
                         binding: 1,
                         array_offset: 0,
                         write: DescriptorWrite::StorageImage(vec![
-                            (inputs[1], ImageLayout::General),
+                            (&views[1], ImageLayout::General),
                         ]),
                     },
                     DescriptorSetWrite {
@@ -419,7 +436,7 @@ where
                         binding: 2,
                         array_offset: 0,
                         write: DescriptorWrite::StorageImage(vec![
-                            (inputs[2], ImageLayout::General),
+                            (&views[2], ImageLayout::General),
                         ]),
                     },
                     DescriptorSetWrite {
@@ -427,7 +444,7 @@ where
                         binding: 3,
                         array_offset: 0,
                         write: DescriptorWrite::StorageImage(vec![
-                            (inputs[3], ImageLayout::General),
+                            (&views[3], ImageLayout::General),
                         ]),
                     },
                     DescriptorSetWrite {
@@ -441,6 +458,7 @@ where
                 ]);
                 Cache {
                     uniforms: vec![buffer],
+                    views,
                     set,
                 }
             });
@@ -453,7 +471,7 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
-        _inputs: &[&B::ImageView],
+        _inputs: &[&B::Image],
         frame: usize,
         scene: &Scene<B, ObjectData>,
     ) {
@@ -498,11 +516,12 @@ where
     colors.clear();
     depths.clear();
 
+    colors.push(ColorAttachment::new(Format::Rgba32Float).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])));
+    colors.push(ColorAttachment::new(Format::Rgba32Float).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])));
+    colors.push(ColorAttachment::new(Format::Rgba32Float).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])));
+    colors.push(ColorAttachment::new(Format::Rgba32Float).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])));
     colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
-    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
-    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.1, 0.0, 0.0, 1.0])));
-    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
-    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.1, 0.1, 0.0, 1.0])));
+    depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
     depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
 
     let prepare = DrawPbmPrepare.build()
@@ -518,7 +537,7 @@ where
         .with_sampled(&colors[2])
         .with_sampled(&colors[3])
         .with_color(&colors[4])
-        .with_depth_stencil(&depths[0]);
+        .with_depth_stencil(&depths[1]);
 
     GraphBuilder::new()
         .with_pass(prepare)
@@ -558,16 +577,32 @@ where
 
     scene.lights.push(
         Light {
-            color: [2.0, 0.0, 0.0],
-            transform: Matrix4::from_translation([2.0, 7.0, 10.0].into()),
+            color: [0.0, 0.623529411764706, 0.419607843137255],
+            transform: Matrix4::from_translation([-6.25, -6.25, 10.0].into()),
             cache: Vec::new(),
         }
     );
 
     scene.lights.push(
         Light {
-            color: [0.0, 0.0, 2.0],
-            transform: Matrix4::from_translation([-7.0, 2.0, 10.0].into()),
+            color: [0.768627450980392, 0.007843137254902, 0.2],
+            transform: Matrix4::from_translation([6.25, -6.25, 10.0].into()),
+            cache: Vec::new(),
+        }
+    );
+
+    scene.lights.push(
+        Light {
+            color: [1.0, 0.827450980392157, 0.0],
+            transform: Matrix4::from_translation([-6.25, 6.25, 10.0].into()),
+            cache: Vec::new(),
+        }
+    );
+
+    scene.lights.push(
+        Light {
+            color: [0.0, 0.529411764705882, 0.741176470588235],
+            transform: Matrix4::from_translation([6.25, 6.25, 10.0].into()),
             cache: Vec::new(),
         }
     );

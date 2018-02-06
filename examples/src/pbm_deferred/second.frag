@@ -9,7 +9,7 @@ layout(set = 0, binding = 3, rgba32f) uniform readonly image2D input_position_de
 layout(set = 0, binding = 4) uniform FragmentArgs {
     vec3 light_position;
     float _pad0;
-    vec3 color;
+    vec3 light_color;
     float _pad1;
     vec3 camera_position;
     float _pad2;
@@ -48,8 +48,7 @@ vec3 calc_fresnel(float HdotV, vec3 fresnel_base) {
 }
 
 vec4 read_local(readonly image2D image) {
-    vec2 coord = imageSize(image) * gl_FragCoord.xy;
-    return imageLoad(image, ivec2(int(coord.x), int(coord.y)));
+    return imageLoad(image, ivec2(gl_FragCoord.xy));
 }
 
 void main() {
@@ -72,10 +71,8 @@ void main() {
     float roughness2 = roughness * roughness;
     vec3 fresnel_base = mix(vec3(0.04), albedo, metallic);
 
-    vec3 lighted = vec3(0.0);
-
-    vec3 view_direction = normalize(camera_position - position);
-    vec3 light_direction = normalize(light_position - position);
+    vec3 view_direction = normalize(camera_position - position.xyz);
+    vec3 light_direction = normalize(light_position.xyz - position.xyz);
     float intensity = 1.0 / dot(light_direction, light_direction);
 
     vec3 halfway = normalize(view_direction + light_direction);
@@ -94,10 +91,10 @@ void main() {
     float denominator = 4 * NdotV * NdotL + 0.0001;
     vec3 specular = nominator / denominator;
 
-    lighted += (diffuse * albedo / PI + specular) * color * intensity * NdotL;
+    vec3 lighted = (diffuse * albedo / PI + specular) * light_color.rgb * intensity * NdotL;
 
     vec3 ambient = ambient_light * albedo * ambient_occlusion;
     vec3 color = ambient + lighted + emission;
-   
+
     out_color = vec4(color, 1.0);
 }
