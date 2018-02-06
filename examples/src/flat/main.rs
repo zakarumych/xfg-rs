@@ -120,7 +120,7 @@ where
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
         device: &B::Device,
-        _inputs: &[&B::ImageView],
+        _inputs: &[&B::Image],
         frame: usize,
         scene: &mut Scene<B>,
     )
@@ -151,6 +151,7 @@ where
                 }]);
                 Cache {
                     uniforms: vec![buffer],
+                    views: Vec::new(),
                     set,
                 }
             });
@@ -163,7 +164,7 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         _device: &B::Device,
-        _inputs: &[&B::ImageView],
+        _inputs: &[&B::Image],
         frame: usize,
         scene: &Scene<B>,
     ) {       
