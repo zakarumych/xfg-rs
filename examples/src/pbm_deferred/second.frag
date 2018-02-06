@@ -17,7 +17,7 @@ layout(set = 0, binding = 4) uniform FragmentArgs {
     float _pad3;
 };
 
-// layout(depth_less) out float gl_FragDepth;
+layout(pixel_center_integer) in vec4 gl_FragCoord;
 layout(location = 0) out vec4 out_color;
 
 const float PI = 3.14159265359;
