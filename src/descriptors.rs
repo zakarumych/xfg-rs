@@ -97,17 +97,45 @@ where
 }
 
 fn bindings_to_range_desc(bindings: &[DescriptorSetLayoutBinding]) -> Vec<DescriptorRangeDesc> {
-    let mut desc: Vec<DescriptorRangeDesc> = Vec::new();
+    let mut descs: Vec<DescriptorRangeDesc> = vec![
+        DescriptorRangeDesc {
+            ty: DescriptorType::Sampler,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::SampledImage,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::StorageImage,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::UniformTexelBuffer,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::StorageTexelBuffer,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::UniformBuffer,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::StorageBuffer,
+            count: 0,
+        },
+        DescriptorRangeDesc {
+            ty: DescriptorType::InputAttachment,
+            count: 0,
+        },
+    ];
     for binding in bindings {
-        let desc_len = desc.len();
-        desc.extend(
-            (desc_len..binding.binding + 1).map(|_| DescriptorRangeDesc {
-                ty: DescriptorType::UniformBuffer,
-                count: 0,
-            }),
-        );
-        desc[binding.binding].ty = binding.ty;
-        desc[binding.binding].count = binding.count;
+        let ref mut desc = descs[binding.ty as usize];
+        debug_assert_eq!(desc.ty, binding.ty);
+        desc.count += binding.count * CAPACITY;
     }
-    desc
+    descs.retain(|desc| desc.count > 0);
+    descs
 }
