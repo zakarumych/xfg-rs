@@ -221,7 +221,6 @@ where
             obj.cache.extend(grow);
             let cache = obj.cache[frame].get_or_insert_with(|| {
                 let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, fragment_args_range.end, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
-                println!("Uniform buffer: {:#?}. Vertex: {:#?}, Fragment: {:#?}", buffer, vertex_args_range.clone(), fragment_args_range.clone());
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
                     DescriptorSetWrite {
