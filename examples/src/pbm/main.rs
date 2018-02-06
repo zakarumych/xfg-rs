@@ -68,7 +68,7 @@ struct ObjectData {
 struct FragmentArgs {
     plight: [PointLight; 32],
     camera_position: [f32; 3],
-    point_light_count: i32,
+    point_light_count: u32,
     ambient_light: [f32; 3],
     ambient_occlusion: f32,
     albedo: [f32; 3],
@@ -203,7 +203,7 @@ where
             let fragment_args = FragmentArgs {
                 plight,
                 camera_position,
-                point_light_count: point_light_count as i32,
+                point_light_count: point_light_count as u32,
                 ambient_light: scene.ambient.0,
                 ambient_occlusion: obj.data.ambient_occlusion,
                 albedo: obj.data.albedo,

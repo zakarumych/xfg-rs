@@ -16,7 +16,7 @@ struct DirectionalLight {
 layout(binding = 1, set = 0) uniform FragmentArgs {
     PointLight plight[32];
     vec3 camera_position;
-    int point_light_count;
+    uint point_light_count;
     vec3 ambient_light;
     float ambient_occlusion;
     vec3 albedo;
@@ -64,7 +64,7 @@ void main() {
     vec3 fresnel_base = mix(vec3(0.04), albedo, metallic);
 
     vec3 lighted = vec3(0.0);
-    for (int i = 0; i < max(point_light_count, 32); i++) {
+    for (int i = 0; i < min(point_light_count, 1); i++) {
         vec3 view_direction = normalize(camera_position - vertex.position.xyz);
         vec3 light_direction = normalize(plight[i].position.xyz - vertex.position.xyz);
         float intensity = 1.0 / dot(light_direction, light_direction);
