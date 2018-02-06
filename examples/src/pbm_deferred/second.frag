@@ -17,7 +17,7 @@ layout(set = 0, binding = 4) uniform FragmentArgs {
     float _pad3;
 };
 
-layout(depth_less) out float gl_FragDepth;
+// layout(depth_less) out float gl_FragDepth;
 layout(location = 0) out vec4 out_color;
 
 const float PI = 3.14159265359;
@@ -66,7 +66,7 @@ void main() {
 
     vec4 position_depth = read_local(input_position_depth);
     vec3 position = position_depth.xyz;
-    gl_FragDepth = position_depth.w;
+    // gl_FragDepth = position_depth.w;
 
     float roughness2 = roughness * roughness;
     vec3 fresnel_base = mix(vec3(0.04), albedo, metallic);

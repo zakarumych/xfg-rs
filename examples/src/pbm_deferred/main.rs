@@ -10,20 +10,20 @@ use xfg_examples::*;
 use std::borrow::Borrow;
 use std::sync::Arc;
 
-use cgmath::{Deg, PerspectiveFov, Transform, Matrix4, EuclideanSpace, Point3};
+use cgmath::{Transform, Matrix4, EuclideanSpace, Point3};
 
 use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, RenderPassInlineEncoder, Primary};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::{AspectFlags, Format, Swizzle};
-use gfx_hal::image::{ImageLayout, SubresourceRange};
-use gfx_hal::memory::{cast_slice, Pod};
-use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, DescriptorWrite, Element, ElemStride, EntryPoint, GraphicsShaderSet, ShaderStageFlags, VertexBufferSet};
+use gfx_hal::image::{Access, ImageLayout, SubresourceRange};
+use gfx_hal::memory::{cast_slice, Barrier, Pod};
+use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, DescriptorWrite, Element, ElemStride, EntryPoint, GraphicsShaderSet, ShaderStageFlags, VertexBufferSet, PipelineStage};
 use gfx_hal::queue::Transfer;
 use gfx_mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
-use xfg::{DescriptorPool, Pass, ColorAttachment, DepthStencilAttachment, GraphBuilder, Attachment};
+use xfg::{DescriptorPool, Pass, ColorAttachment, DepthStencilAttachment, GraphBuilder};
 
 
 
@@ -282,7 +282,7 @@ where
     }
 
     /// Uses depth attachment
-    fn depth(&self) -> bool { true }
+    fn depth(&self) -> bool { false }
 
     /// Uses stencil attachment
     fn stencil(&self) -> bool { false }
@@ -382,7 +382,6 @@ where
         let ref mut allocator = scene.allocator;
         let camera_position = scene.camera.transform.transform_point(Point3::origin()).into();
 
-        let view = scene.camera.transform.inverse_transform().unwrap();
         // Update uniform cache
         for light in &mut scene.lights {
             let fragment_args = FragmentArgs {
@@ -396,16 +395,17 @@ where
                 _pad3: 0.0,
             };
 
+            let color_range = SubresourceRange {
+                aspects: AspectFlags::COLOR,
+                levels: 0..1,
+                layers: 0..1,
+            };
+
             let size = ::std::mem::size_of::<FragmentArgs>() as u64;
 
             let grow = (light.cache.len() .. frame + 1).map(|_| None);
             light.cache.extend(grow);
             let cache = light.cache[frame].get_or_insert_with(|| {
-                let color_range = SubresourceRange {
-                    aspects: AspectFlags::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
-                };
                 let views = vec![
                     device.create_image_view(inputs[0], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
                     device.create_image_view(inputs[1], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
@@ -462,6 +462,34 @@ where
                     set,
                 }
             });
+
+            let states = (Access::COLOR_ATTACHMENT_WRITE, ImageLayout::General) .. (Access::SHADER_READ, ImageLayout::General);
+            cbuf.pipeline_barrier(
+                PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::FRAGMENT_SHADER,
+                &[
+                    Barrier::Image {
+                        states: states.clone(),
+                        target: inputs[0],
+                        range: color_range.clone(),
+                    },
+                    Barrier::Image {
+                        states: states.clone(),
+                        target: inputs[1],
+                        range: color_range.clone(),
+                    },
+                    Barrier::Image {
+                        states: states.clone(),
+                        target: inputs[2],
+                        range: color_range.clone(),
+                    },
+                    Barrier::Image {
+                        states: states.clone(),
+                        target: inputs[3],
+                        range: color_range.clone(),
+                    },
+                ]
+            );
+
             cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[fragment_args]));
         }
     }
@@ -522,7 +550,6 @@ where
     colors.push(ColorAttachment::new(Format::Rgba32Float).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])));
     colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
     depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
-    depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
 
     let prepare = DrawPbmPrepare.build()
         .with_color(&colors[0])
@@ -536,8 +563,7 @@ where
         .with_sampled(&colors[1])
         .with_sampled(&colors[2])
         .with_sampled(&colors[3])
-        .with_color(&colors[4])
-        .with_depth_stencil(&depths[1]);
+        .with_color(&colors[4]);
 
     GraphBuilder::new()
         .with_pass(prepare)
@@ -616,7 +642,7 @@ fn create_sphere<B>(device: &B::Device, factory: &mut SmartAllocator<B>) -> Mesh
 where
     B: Backend,
 {
-    use genmesh::{EmitTriangles, Polygon, Triangle};
+    use genmesh::{EmitTriangles, Triangle};
     use genmesh::generators::{SphereUV, SharedVertex, IndexedPolygon};
 
     let sphere = SphereUV::new(40, 20);

@@ -8,8 +8,8 @@ use gfx_hal::{Backend, Device};
 use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
-use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
-                   PipelineStage};
+use gfx_hal::pso::{Comparison, ColorBlendDesc, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
+                   PipelineStage, StencilTest};
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
@@ -48,7 +48,7 @@ where
 
     /// Blending for color attachment
     fn color_blend(&self, _index: usize) -> ColorBlendDesc {
-        ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)
+        ColorBlendDesc::EMPTY
     }
 
     /// Will the pass write to the depth buffer
@@ -56,6 +56,23 @@ where
 
     /// Will the pass use the stencil buffer
     fn stencil(&self) -> bool;
+
+    /// Get depth stencil description
+    fn depth_stencil_desc(&self) -> Option<DepthStencilDesc> {
+        debug_assert!(!self.stencil());
+        if self.depth() {
+            Some(DepthStencilDesc {
+                depth: DepthTest::On {
+                    fun: Comparison::LessEqual,
+                    write: true,
+                },
+                depth_bounds: false,
+                stencil: StencilTest::Off,
+            })
+        } else {
+            None
+        }
+    }
 
     /// Vertex formats required by the pass
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)];

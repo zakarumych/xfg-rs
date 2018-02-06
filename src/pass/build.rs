@@ -364,14 +364,7 @@ where
                 ).collect();
 
             // Default configuration for depth-stencil
-            pipeline_desc.depth_stencil = Some(pso::DepthStencilDesc {
-                depth: pso::DepthTest::On {
-                    fun: pso::Comparison::LessEqual,
-                    write: true,
-                },
-                depth_bounds: false,
-                stencil: pso::StencilTest::Off,
-            });
+            pipeline_desc.depth_stencil = self.pass.depth_stencil_desc();
 
             // Add all vertex descriptors
             for &(attributes, stride) in self.pass.vertices() {
