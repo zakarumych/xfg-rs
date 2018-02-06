@@ -7,7 +7,7 @@ use std::ptr::eq;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
-use gfx_hal::format::{AspectFlags, Format, Swizzle};
+use gfx_hal::format::{Format, Swizzle};
 use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
@@ -17,13 +17,6 @@ use attachment::{Attachment, ColorAttachment, ColorAttachmentDesc,
                  DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
 use graph::Graph;
 use pass::{PassBuilder, PassNode};
-
-/// Color range for render targets
-pub const COLOR_RANGE: SubresourceRange = SubresourceRange {
-    aspects: AspectFlags::COLOR,
-    levels: 0..1,
-    layers: 0..1,
-};
 
 /// Possible errors during graph building
 #[derive(Debug, Clone)]
@@ -250,7 +243,11 @@ where
                             image,
                             present.format,
                             Swizzle::NO,
-                            COLOR_RANGE.clone(),
+                            SubresourceRange {
+                                aspects: present.format.aspect_flags(),
+                                layers: 0..1,
+                                levels: 0..1,
+                            },
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()
@@ -552,12 +549,16 @@ where
                 Usage::DEPTH_STENCIL_ATTACHMENT
             } else {
                 Usage::COLOR_ATTACHMENT
-            },
+            } | Usage::STORAGE,
             Properties::DEVICE_LOCAL,
             device,
         )?;
         let view = device
-            .create_image_view(image.borrow(), format, Swizzle::NO, COLOR_RANGE.clone())
+            .create_image_view(image.borrow(), format, Swizzle::NO, SubresourceRange {
+                aspects: format.aspect_flags(),
+                layers: 0..1,
+                levels: 0..1,
+            })
             .expect("Views are expected to be created");
         views.push(view);
         images.push(image);

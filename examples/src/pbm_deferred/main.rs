@@ -189,7 +189,7 @@ where
             let grow = (obj.cache.len() .. frame + 1).map(|_| None);
             obj.cache.extend(grow);
             let cache = obj.cache[frame].get_or_insert_with(|| {
-                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
+                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
                     DescriptorSetWrite {
@@ -412,7 +412,7 @@ where
                     device.create_image_view(inputs[2], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
                     device.create_image_view(inputs[3], Format::Rgba32Float, Swizzle::NO, color_range.clone()).unwrap(),
                 ];
-                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
+                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[
                     DescriptorSetWrite {

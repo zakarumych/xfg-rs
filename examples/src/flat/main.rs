@@ -141,7 +141,7 @@ where
             
             let cache = obj.cache[frame].get_or_insert_with(|| {
                 let size = ::std::mem::size_of::<TrProjView>() as u64;
-                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM).unwrap();
+                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
                 let set = pool.allocate(device);
                 device.update_descriptor_sets(&[DescriptorSetWrite {
                     set: &set,
