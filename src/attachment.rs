@@ -2,17 +2,34 @@
 //!
 
 use std::ops::Range;
-use std::ptr::eq;
 
-use gfx_hal::command::{ClearColor, ClearDepthStencil};
+use gfx_hal::command::{ClearColor, ClearValue, ClearDepthStencil};
 use gfx_hal::format::{AspectFlags, Format};
+use gfx_hal::image::ImageLayout;
+use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
+
+/// Attachment declaration.
+#[derive(Clone, Copy, Debug)]
+pub struct Attachment {
+    pub(crate) format: Format,
+    pub(crate) clear: Option<ClearValue>,
+}
+
+impl From<ColorAttachment> for Attachment {
+    fn from(color: ColorAttachment) -> Self {
+        color.0
+    }
+}
+
+impl From<DepthStencilAttachment> for Attachment {
+    fn from(depth_stencil: DepthStencilAttachment) -> Self {
+        depth_stencil.0
+    }
+}
 
 /// Attachment declaration with color format.
-#[derive(Debug)]
-pub struct ColorAttachment {
-    pub(crate) format: Format,
-    pub(crate) clear: Option<ClearColor>,
-}
+#[derive(Clone, Copy, Debug)]
+pub struct ColorAttachment(pub(crate) Attachment);
 
 impl ColorAttachment {
     /// Declare new attachment with format specified.
@@ -22,10 +39,10 @@ impl ColorAttachment {
     /// If format aspect is not color.
     pub fn new(format: Format) -> Self {
         assert_eq!(format.aspect_flags(), AspectFlags::COLOR);
-        ColorAttachment {
+        ColorAttachment(Attachment {
             format,
             clear: None,
-        }
+        })
     }
 
     /// Set clearing color for the attachment.
@@ -38,20 +55,13 @@ impl ColorAttachment {
     /// Set clearing color for the attachment.
     /// First pass that use the attachment as output will clear it.
     pub fn set_clear(&mut self, clear: ClearColor) {
-        self.clear = Some(clear);
-    }
-
-    pub(crate) fn ptr(&self) -> *const Self {
-        self as *const _
+        self.0.clear = Some(ClearValue::Color(clear));
     }
 }
 
 /// Attachment declaration with depth-stencil format.
-#[derive(Debug)]
-pub struct DepthStencilAttachment {
-    pub(crate) format: Format,
-    pub(crate) clear: Option<ClearDepthStencil>,
-}
+#[derive(Clone, Copy, Debug)]
+pub struct DepthStencilAttachment(pub(crate) Attachment);
 
 impl DepthStencilAttachment {
     /// Declare new attachment with format specified.
@@ -61,16 +71,10 @@ impl DepthStencilAttachment {
     /// If format aspect doesn't contain depth.
     pub fn new(format: Format) -> Self {
         assert!(format.aspect_flags().contains(AspectFlags::DEPTH));
-        DepthStencilAttachment {
+        DepthStencilAttachment(Attachment {
             format,
             clear: None,
-        }
-    }
-
-    /// Set clearing values for the attachment.
-    /// First pass that use the attachment as output will clear it.
-    pub fn set_clear(&mut self, clear: ClearDepthStencil) {
-        self.clear = Some(clear);
+        })
     }
 
     /// Set clearing values for the attachment.
@@ -80,67 +84,85 @@ impl DepthStencilAttachment {
         self
     }
 
-    pub(crate) fn ptr(&self) -> *const Self {
-        self as *const _
+    /// Set clearing values for the attachment.
+    /// First pass that use the attachment as output will clear it.
+    pub fn set_clear(&mut self, clear: ClearDepthStencil) {
+        self.0.clear = Some(ClearValue::DepthStencil(clear));
     }
 }
 
-/// Reference to either color or depth-stencil attachment declaration.
-#[derive(Clone, Copy, Debug)]
-pub enum Attachment<'a> {
-    /// Color attachment
-    Color(&'a ColorAttachment),
-
-    /// Depth-stencil attachment
-    DepthStencil(&'a DepthStencilAttachment),
+/// Reference to either color or depth-stencil attachment declaration in `GraphBuilder`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentRef(pub(crate) usize);
+impl AttachmentRef {
+    pub(crate) fn index(&self) -> usize {
+        self.0
+    }
 }
 
-impl<'a> Attachment<'a> {
-    /// Get format of the attachment.
-    pub(crate) fn format(self) -> Format {
-        match self {
-            Attachment::Color(color) => color.format,
-            Attachment::DepthStencil(depth) => depth.format,
+
+#[derive(Debug)]
+pub(crate) struct AttachmentDesc {
+    pub(crate) format: Format,
+    pub(crate) clear: Option<ClearValue>,
+    pub(crate) write: Option<Range<usize>>,
+    pub(crate) read: Option<Range<usize>>,
+    pub(crate) images: Option<Range<usize>>,
+    pub(crate) views: Option<Range<usize>>,
+    pub(crate) is_surface: bool,
+}
+
+impl AttachmentDesc {
+    fn is_first_write(&self, index: usize) -> bool {
+        self.write.clone().map_or(false, |w| w.start == index)
+    }
+    fn is_last_write(&self, index: usize) -> bool {
+        self.write.clone().map_or(false, |w| w.end == index)
+    }
+    fn is_last_read(&self, index: usize) -> bool {
+        self.read.clone().map_or(false, |r| r.end == index)
+    }
+    fn is_first_touch(&self, index: usize) -> bool {
+        self.is_first_write(index)
+    }
+    fn is_last_touch(&self, index: usize) -> bool {
+        self.is_last_read(index) || (self.is_last_write(index) && self.read.is_none())
+    }
+
+    pub(crate) fn load_op(&self, index: usize) -> AttachmentLoadOp {
+        if self.is_first_touch(index) {
+            if self.clear.is_some() {
+                AttachmentLoadOp::Clear
+            } else {
+                AttachmentLoadOp::DontCare
+            }
+        } else {
+            AttachmentLoadOp::Load
         }
     }
 
-    pub(crate) fn is(self, rhs: Self) -> bool {
-        match (self, rhs) {
-            (Attachment::Color(lhs), Attachment::Color(rhs)) => eq(lhs, rhs),
-            (Attachment::DepthStencil(lhs), Attachment::DepthStencil(rhs)) => eq(lhs, rhs),
-            _ => false,
+    pub(crate) fn store_op(&self, index: usize) -> AttachmentStoreOp {
+        if self.is_last_touch(index) && !self.is_surface {
+            if self.is_last_write(index) && !self.format.aspect_flags().contains(AspectFlags::DEPTH) {
+                warn!("Pass at index {} writes to an attachment and nobody reads it", index);
+            }
+            AttachmentStoreOp::DontCare
+        } else {
+            AttachmentStoreOp::Store
         }
     }
-}
 
-impl<'a> From<&'a ColorAttachment> for Attachment<'a> {
-    fn from(color: &'a ColorAttachment) -> Self {
-        Attachment::Color(color)
+    pub(crate) fn image_layout_transition(&self, index: usize) -> Range<ImageLayout> {
+        let start = if self.is_first_touch(index) {
+            ImageLayout::Undefined
+        } else {
+            ImageLayout::General
+        };
+        let end = if self.is_last_touch(index) && self.is_surface {
+            ImageLayout::Present
+        } else {
+            ImageLayout::General
+        };
+        start .. end
     }
-}
-
-impl<'a> From<&'a DepthStencilAttachment> for Attachment<'a> {
-    fn from(depth_stencil: &'a DepthStencilAttachment) -> Self {
-        Attachment::DepthStencil(depth_stencil)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct InputAttachmentDesc {
-    pub(crate) format: Format,
-    pub(crate) indices: Range<usize>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ColorAttachmentDesc {
-    pub(crate) format: Format,
-    pub(crate) indices: Option<Range<usize>>,
-    pub(crate) clear: Option<ClearColor>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct DepthStencilAttachmentDesc {
-    pub(crate) format: Format,
-    pub(crate) indices: Option<Range<usize>>,
-    pub(crate) clear: Option<ClearDepthStencil>,
 }

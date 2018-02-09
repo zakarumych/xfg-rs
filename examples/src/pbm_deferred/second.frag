@@ -4,7 +4,7 @@
 layout(set = 0, binding = 0, rgba32f) uniform readonly image2D input_albedo_roughness;
 layout(set = 0, binding = 1, rgba32f) uniform readonly image2D input_emission_metallic;
 layout(set = 0, binding = 2, rgba32f) uniform readonly image2D input_normal_ambient_occlusion;
-layout(set = 0, binding = 3, rgba32f) uniform readonly image2D input_position_depth;
+layout(set = 0, binding = 3, rgba32f) uniform readonly image2D input_position;
 
 layout(set = 0, binding = 4) uniform FragmentArgs {
     vec3 light_position;
@@ -64,7 +64,7 @@ void main() {
     vec3 normal = normal_ambient_occlusion.rgb;
     float ambient_occlusion = normal_ambient_occlusion.a;
 
-    vec4 position_depth = read_local(input_position_depth);
+    vec4 position_depth = read_local(input_position);
     vec3 position = position_depth.xyz;
     // gl_FragDepth = position_depth.w;
 

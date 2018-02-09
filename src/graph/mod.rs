@@ -9,6 +9,8 @@
 
 pub use self::build::{GraphBuildError, GraphBuilder};
 
+use std::ops::Range;
+
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::{OneShot, Viewport};
 use gfx_hal::pool::CommandPool;
@@ -19,7 +21,7 @@ use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 use smallvec::SmallVec;
 
 use frame::SuperFrame;
-use pass::PassNode;
+use pass::{Pass, PassNode};
 
 mod build;
 
@@ -35,21 +37,21 @@ mod build;
 /// - `T`: auxiliary data used by the graph, user supplied, not touched by the graph itself, only
 ///        passed on to the `Pass`es
 #[derive(Debug)]
-pub struct Graph<B: Backend, I, T> {
-    passes: Vec<PassNode<B, T>>,
+pub struct Graph<B: Backend, I, P> {
+    passes: Vec<PassNode<B, P>>,
     signals: Vec<Option<B::Semaphore>>,
     images: Vec<I>,
     views: Vec<B::ImageView>,
     frames: usize,
-    first_draws_to_surface: usize,
+    draws_to_surface: Range<usize>,
 }
 
-impl<B, I, T> Graph<B, I, T>
+impl<B, I, P> Graph<B, I, P>
 where
     B: Backend,
 {
     /// Start building the render graph
-    pub fn build<'a>() -> GraphBuilder<'a, B, T> {
+    pub fn build() -> GraphBuilder<P> {
         GraphBuilder::new()
     }
 
@@ -81,7 +83,7 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn draw_inline<C>(
+    pub fn draw_inline<C, T>(
         &mut self,
         queue: &mut CommandQueue<B, C>,
         pool: &mut CommandPool<B, C>,
@@ -94,12 +96,13 @@ where
         aux: &mut T,
     ) where
         C: Supports<Graphics> + Supports<Transfer>,
+        P: Pass<B, T>,
     {
         use gfx_hal::queue::submission::Submission;
 
         let ref signals = self.signals;
         let count = self.passes.len();
-        let first_draws_to_surface = self.first_draws_to_surface;
+        let ref draws_to_surface = self.draws_to_surface;
 
         // Record commands for all passes
         self.passes.iter_mut().enumerate().for_each(|(id, pass)| {
@@ -116,7 +119,7 @@ where
 
             {
                 // If it renders to acquired image
-                let wait_surface = if id == first_draws_to_surface {
+                let wait_surface = if id == draws_to_surface.start {
                     // And it should wait for acquisition
                     Some((acquire, PipelineStage::TOP_OF_PIPE))
                 } else {
@@ -131,12 +134,12 @@ where
                     .collect::<SmallVec<[_; 3]>>();
 
                 let mut to_signal = SmallVec::<[_; 1]>::new();
-                if id == count - 1 {
-                    // TODO: Find the last one that draws on to surface.
+                if id == draws_to_surface.end {
                     to_signal.push(release);
-                } else if let Some(signal) = signals[id].as_ref() {
+                }
+                if let Some(signal) = signals[id].as_ref() {
                     to_signal.push(signal);
-                };
+                }
 
                 // Signal the finish fence in last submission
                 let fence = if id == count - 1 { Some(finish) } else { None };
@@ -167,9 +170,10 @@ where
     /// ### Type parameters:
     ///
     /// - `F`: deallocator function
-    pub fn dispose<F>(self, mut deallocator: F, device: &B::Device, aux: &mut T)
+    pub fn dispose<F, T>(self, mut deallocator: F, device: &B::Device, aux: &mut T)
     where
         F: FnMut(I, &B::Device),
+        P: Pass<B, T>,
     {
         for pass in self.passes {
             pass.dispose(device, aux);

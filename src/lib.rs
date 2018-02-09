@@ -23,7 +23,7 @@ pub use attachment::{Attachment, ColorAttachment, DepthStencilAttachment};
 pub use descriptors::DescriptorPool;
 pub use frame::SuperFrame;
 pub use graph::{Graph, GraphBuildError, GraphBuilder};
-pub use pass::{Pass, PassBuilder};
+pub use pass::{Pass, PassDesc, PassShaders, PassBuilder};
 
 mod attachment;
 mod descriptors;

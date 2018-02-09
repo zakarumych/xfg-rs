@@ -1,22 +1,21 @@
 use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::ops::Range;
-use std::ptr::eq;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
-use gfx_hal::format::{Format, Swizzle};
+use gfx_hal::format::{AspectFlags, Format, Swizzle};
 use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
 
-use attachment::{Attachment, ColorAttachment, ColorAttachmentDesc,
-                 DepthStencilAttachment, DepthStencilAttachmentDesc, InputAttachmentDesc};
+use attachment::{Attachment, AttachmentRef, AttachmentDesc};
 use graph::Graph;
-use pass::{PassBuilder, PassNode};
+use pass::{PassBuilder, PassShaders, PassNode};
+
+
 
 /// Possible errors during graph building
 #[derive(Debug, Clone)]
@@ -103,25 +102,21 @@ where
 ///
 /// - `B`: render `Backend`
 /// - `T`: auxiliary data used by the `Pass`es in the `Graph`
-#[derive(Derivative)]
-#[derivative(Debug(bound = ""))]
-pub struct GraphBuilder<'a, B: Backend, T> {
-    passes: Vec<PassBuilder<'a, B, T>>,
-    present: Option<&'a ColorAttachment>,
-    backbuffer: Option<&'a Backbuffer<B>>,
+#[derive(Debug)]
+pub struct GraphBuilder<P> {
+    attachments: Vec<Attachment>,
+    passes: Vec<PassBuilder<P>>,
+    present: Option<AttachmentRef>,
     extent: Extent,
 }
 
-impl<'a, B, T> GraphBuilder<'a, B, T>
-where
-    B: Backend,
-{
+impl<P> GraphBuilder<P> {
     /// Create a new `GraphBuilder`
     pub fn new() -> Self {
         GraphBuilder {
+            attachments: Vec::new(),
             passes: Vec::new(),
             present: None,
-            backbuffer: None,
             extent: Extent {
                 width: 0,
                 height: 0,
@@ -130,12 +125,42 @@ where
         }
     }
 
+    /// Add an `Attachment` to the `Graph` and return a value to reference added attachment.
+    /// 
+    /// ### Parameters:
+    /// 
+    /// - `attachment`: attachment description.
+    /// 
+    pub fn add_attachment<A>(&mut self, attachment: A) -> AttachmentRef
+    where
+        A: Into<Attachment>,
+    {
+        self.attachments.push(attachment.into());
+        AttachmentRef(self.attachments.len() - 1)
+    }
+
+    /// Add a few `Attachment`s to the `Graph` and return an iterator of references to added attachment.
+    /// 
+    /// ### Parameters:
+    /// 
+    /// - `attachments`: iterator that yields attachment descriptions.
+    /// 
+    pub fn add_attachments<I, A>(&mut self, attachments: I) -> Range<AttachmentRef>
+    where
+        I: IntoIterator<Item=A>,
+        A: Into<Attachment>,
+    {
+        let start = self.attachments.len();
+        self.attachments.extend(attachments.into_iter().map(Into::into));
+        AttachmentRef(start) .. AttachmentRef(self.attachments.len())
+    }
+
     /// Add a `Pass` to the `Graph`
     ///
     /// ### Parameters:
     ///
     /// - `pass`: pass builder
-    pub fn with_pass(mut self, pass: PassBuilder<'a, B, T>) -> Self {
+    pub fn with_pass(mut self, pass: PassBuilder<P>) -> Self {
         self.add_pass(pass);
         self
     }
@@ -145,8 +170,9 @@ where
     /// ### Parameters:
     ///
     /// - `pass`: pass builder
-    pub fn add_pass(&mut self, pass: PassBuilder<'a, B, T>) {
+    pub fn add_pass(&mut self, pass: PassBuilder<P>) -> &mut Self {
         self.passes.push(pass);
+        self
     }
 
     /// Set the extent of the framebuffers
@@ -164,27 +190,9 @@ where
     /// ### Parameters:
     ///
     /// - `extent`: hal `Extent`
-    pub fn set_extent(&mut self, extent: Extent) {
+    pub fn set_extent(&mut self, extent: Extent) -> &mut Self {
         self.extent = extent;
-    }
-
-    /// Set the backbuffer to use
-    ///
-    /// ### Parameters:
-    ///
-    /// - `backbuffer`: hal `Backbuffer`
-    pub fn with_backbuffer(mut self, backbuffer: &'a Backbuffer<B>) -> Self {
-        self.set_backbuffer(backbuffer);
         self
-    }
-
-    /// Set the backbuffer to use
-    ///
-    /// ### Parameters:
-    ///
-    /// - `backbuffer`: hal `Backbuffer`
-    pub fn set_backbuffer(&mut self, backbuffer: &'a Backbuffer<B>) {
-        self.backbuffer = Some(backbuffer);
     }
 
     /// Set presentation draw surface
@@ -192,7 +200,7 @@ where
     /// ### Parameters:
     ///
     /// - `present`: color attachment to use as presentation draw surface for the `Graph`
-    pub fn with_present(mut self, present: &'a ColorAttachment) -> Self {
+    pub fn with_present(mut self, present: AttachmentRef) -> Self {
         self.set_present(present);
         self
     }
@@ -202,8 +210,9 @@ where
     /// ### Parameters:
     ///
     /// - `present`: color attachment to use as presentation draw surface for the `Graph`
-    pub fn set_present(&mut self, present: &'a ColorAttachment) {
+    pub fn set_present(&mut self, present: AttachmentRef) -> &mut Self {
         self.present = Some(present);
+        self
     }
 
     /// Build rendering graph
@@ -218,19 +227,21 @@ where
     /// - `A`: allocator function
     /// - `I`: render target image type
     /// - `E`: errors returned by the allocator function
-    pub fn build<A, I, E>(
+    pub fn build<B, A, I, E>(
         self,
         device: &B::Device,
+        backbuffer: &Backbuffer<B>,
         mut allocator: A,
-    ) -> Result<Graph<B, I, T>, GraphBuildError<E>>
+    ) -> Result<Graph<B, I, P>, GraphBuildError<E>>
     where
+        B: Backend,
         A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
         I: Borrow<B::Image>,
+        P: PassShaders<B>,
     {
         info!("Building graph from {:?}", self);
         let present = self.present
             .ok_or(GraphBuildError::PresentationAttachmentNotSet)?;
-        let backbuffer = self.backbuffer.ok_or(GraphBuildError::BackbufferNotSet)?;
 
         info!("Collect views from backbuffer");
         // Create views for backbuffer
@@ -241,10 +252,10 @@ where
                     .map(|image| {
                         device.create_image_view(
                             image,
-                            present.format,
+                            self.attachments[present.0].format,
                             Swizzle::NO,
                             SubresourceRange {
-                                aspects: present.format.aspect_flags(),
+                                aspects: self.attachments[present.0].format.aspect_flags(),
                                 layers: 0..1,
                                 levels: 0..1,
                             },
@@ -257,147 +268,103 @@ where
             Backbuffer::Framebuffer(_) => (vec![], 1),
         };
 
+        let mut attachments = self.attachments.into_iter().map(|a| {
+            AttachmentDesc {
+                format: a.format,
+                clear: a.clear,
+                write: None,
+                read: None,
+                images: None,
+                views: None,
+                is_surface: false,
+            }
+        }).collect::<Vec<_>>();
+
+        attachments[present.0].views = Some(0 .. image_views.len());
+        attachments[present.0].is_surface = true;
+
         info!("Reorder passes to maximize overlapping");
         // Reorder passes to maximise overlapping
         // while keeping all dependencies before dependants.
         let (passes, deps) = reorder_passes(self.passes);
 
-        let color_attachments = color_attachments(&passes);
-        let depth_stencil_attachments = depth_stencil_attachments(&passes);
-        info!("Collect all used attachments:\ncolors: {:#?}\ndepth-stencil: {:#?}", color_attachments, depth_stencil_attachments);
-
         let mut images = vec![];
 
-        info!("Initialize color targets");
-        let mut color_targets = HashMap::<*const _, (Range<usize>, usize)>::new();
-        color_targets.insert(present, (0..image_views.len(), 0));
-        for attachment in color_attachments {
-            if !eq(attachment, present) {
-                let targets = create_target::<B, _, I, E>(
-                        attachment.format,
+        info!("Build pass nodes from pass builders");
+        let mut pass_nodes: Vec<PassNode<B, P>> = Vec::new();
+
+        for (pass_index, pass) in passes.iter().enumerate() {
+            info!("Check sampled inputs");
+            for &sampled in &pass.sampled {
+                let ref mut sampled = attachments[sampled.0];
+                debug_assert!(sampled.write.is_some());
+                debug_assert!(sampled.views.is_some());
+                debug_assert!(sampled.images.is_some());
+                sampled.read.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+            }
+
+            info!("Check sampled targets");
+            for &sampled in &pass.sampled {
+                let ref mut sampled = attachments[sampled.0];
+                debug_assert!(sampled.write.is_some());
+                debug_assert!(sampled.views.is_some());
+                debug_assert!(sampled.images.is_some());
+                sampled.read.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+            }
+
+            info!("Check input targets");
+            for &input in &pass.inputs {
+                let ref mut input = attachments[input.0];
+                debug_assert!(input.write.is_some());
+                debug_assert!(input.views.is_some());
+                debug_assert!(input.images.is_some());
+                input.read.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+            }
+
+            info!("Create color targets");
+            for &color in &pass.colors {
+                let ref mut color = attachments[color.0.index()];
+                color.write.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                if color.views.is_none() {
+                    debug_assert!(color.images.is_none());
+                    create_target::<B, _, I, E>(
+                        color.format,
                         &mut allocator,
                         device,
                         &mut images,
                         &mut image_views,
                         self.extent,
                         frames,
-                        false,
                     ).map_err(GraphBuildError::AllocationError)?;
-                info!("Create color targets: {:#?}:{:#?}", attachment, targets);
-                color_targets.insert(attachment, (targets, 0));
+                    color.views = Some((image_views.len() - frames .. image_views.len()));
+                    color.images = Some((images.len() - frames .. images.len()));
+                }
+            }
+
+            info!("Create depth-stencil target");
+            if let Some(depth_stencil) = pass.depth_stencil {
+                let ref mut depth_stencil = attachments[depth_stencil.0.index()];
+                depth_stencil.write.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                if depth_stencil.views.is_none() {
+                    debug_assert!(depth_stencil.images.is_none());
+                    create_target::<B, _, I, E>(
+                        depth_stencil.format,
+                        &mut allocator,
+                        device,
+                        &mut images,
+                        &mut image_views,
+                        self.extent,
+                        frames,
+                    ).map_err(GraphBuildError::AllocationError)?;
+                    depth_stencil.views = Some((image_views.len() - frames .. image_views.len()));
+                    depth_stencil.images = Some((images.len() - frames .. images.len()));
+                }
             }
         }
 
-        info!("Initialize depth-stencil targets");
-        let mut depth_stencil_targets = HashMap::<*const _, (Range<usize>, usize)>::new();
-        for attachment in depth_stencil_attachments {
-            let targets = create_target::<B, _, I, E>(
-                attachment.format,
-                &mut allocator,
-                device,
-                &mut images,
-                &mut image_views,
-                self.extent,
-                frames,
-                true,
-            ).map_err(GraphBuildError::AllocationError)?;
-            info!("Create depth-stencil targets: {:#?}:{:#?}", attachment, targets);
-            depth_stencil_targets.insert(attachment, (targets, 0));
-        }
-
-        info!("Build pass nodes from pass builders");
-        let mut pass_nodes: Vec<PassNode<B, T>> = Vec::new();
-
-        let mut first_draws_to_surface = None;
-
         for ((pass_index, pass), last_dep) in passes.into_iter().enumerate().zip(deps) {
-            info!("Collect samped inputs");
-            let sampled = pass.sampled
-                .iter()
-                .map(|input| {
-                    let (ref indices, ref written) = *match *input {
-                        Attachment::Color(ref color) => &color_targets[&color.ptr()],
-                        Attachment::DepthStencil(ref depth_stencil) => {
-                            &depth_stencil_targets[&depth_stencil.ptr()]
-                        }
-                    };
-                    let indices = indices.clone();
-                    debug_assert!(*written > 0);
-                    InputAttachmentDesc {
-                        format: input.format(),
-                        indices,
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            info!("Collect input targets");
-            let inputs = pass.inputs
-                .iter()
-                .map(|input| {
-                    let (ref indices, ref written) = *match *input {
-                        Attachment::Color(ref color) => &color_targets[&color.ptr()],
-                        Attachment::DepthStencil(ref depth_stencil) => {
-                            &depth_stencil_targets[&depth_stencil.ptr()]
-                        }
-                    };
-                    let indices = indices.clone();
-                    debug_assert!(*written > 0);
-                    InputAttachmentDesc {
-                        format: input.format(),
-                        indices,
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            info!("Collect color targets");
-            let colors = pass.colors
-                .iter()
-                .map(|&color| {
-                    if first_draws_to_surface.is_none() && eq(color, present) {
-                        info!("First pass draws to surface: {}({})", pass.name(), pass_index);
-                        first_draws_to_surface = Some(pass_index);
-                    }
-                    let (ref indices, ref mut written) =
-                        *color_targets.get_mut(&color.ptr()).unwrap();
-                    let indices = indices.clone();
-                    let clear = if *written == 0 { color.clear } else { None };
-
-                    *written += 1;
-
-                    ColorAttachmentDesc {
-                        format: color.format,
-                        indices: if is_images(backbuffer) {
-                            Some(indices)
-                        } else {
-                            None
-                        },
-                        clear,
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            info!("Collect depth-stencil targets");
-            let depth_stencil = pass.depth_stencil.clone().map(|depth_stencil| {
-                let (ref indices, ref mut written) =
-                    *depth_stencil_targets.get_mut(&depth_stencil.ptr()).unwrap();
-                let indices = indices.clone();
-                let clear = if *written == 0 { depth_stencil.clear } else { None };
-
-                *written += 1;
-
-                DepthStencilAttachmentDesc {
-                    format: depth_stencil.format,
-                    indices: if is_images(backbuffer) {
-                        Some(indices)
-                    } else {
-                        None
-                    },
-                    clear,
-                }
-            });
-
             let mut node =
-                pass.build(device, &sampled, &inputs, &colors, depth_stencil, self.extent, &image_views, &images)?;
+                pass.build(device, self.extent, &attachments, &image_views, &images, pass_index)?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -452,17 +419,14 @@ where
             images,
             views: image_views,
             frames,
-            first_draws_to_surface: first_draws_to_surface.unwrap(),
+            draws_to_surface: attachments[present.0].write.clone().unwrap(),
         })
     }
 }
 
-fn reorder_passes<'a, B, T: 'a>(
-    mut unscheduled: Vec<PassBuilder<'a, B, T>>,
-) -> (Vec<PassBuilder<'a, B, T>>, Vec<Option<usize>>)
-where
-    B: Backend,
-{
+fn reorder_passes<P>(
+    mut unscheduled: Vec<PassBuilder<P>>,
+) -> (Vec<PassBuilder<P>>, Vec<Option<usize>>) {
     // Ordered passes
     let mut scheduled = vec![];
     let mut deps = vec![];
@@ -493,35 +457,81 @@ where
     (scheduled, deps)
 }
 
-/// Get all color attachments for all passes
-fn color_attachments<'a, B, T>(passes: &[PassBuilder<'a, B, T>]) -> Vec<&'a ColorAttachment>
-where
-    B: Backend,
-{
-    let mut attachments = Vec::new();
-    for pass in passes {
-        attachments.extend(pass.colors.iter().cloned());
+/// Get dependencies of pass.
+fn direct_dependencies<P>(
+    passes: &[PassBuilder<P>],
+    pass: &PassBuilder<P>,
+) -> Vec<usize> {
+    let mut deps = Vec::new();
+    for &input in pass.inputs.iter().chain(&pass.sampled) {
+        deps.extend(
+            passes
+                .iter()
+                .enumerate()
+                .filter(|p| {
+                    p.1.depth_stencil.map(|(a, _)| a) == Some(input)
+                        || p.1
+                            .colors
+                            .iter()
+                            .any(|&(a, _)| input == a)
+                })
+                .map(|p| p.0),
+        );
     }
-    attachments.sort_by_key(|a| a as *const _);
-    attachments.dedup_by_key(|a| a as *const _);
-    attachments
+    deps.sort();
+    deps.dedup();
+    deps
 }
 
-/// Get all depth_stencil attachments for all passes
-fn depth_stencil_attachments<'a, B, T>(
-    passes: &[PassBuilder<'a, B, T>],
-) -> Vec<&'a DepthStencilAttachment>
-where
-    B: Backend,
-{
-    let mut attachments = Vec::new();
-    for pass in passes {
-        attachments.extend(pass.depth_stencil.as_ref().cloned());
+/// Get other passes that shares output attachments
+fn siblings<P>(
+    passes: &[PassBuilder<P>],
+    pass: &PassBuilder<P>,
+) -> Vec<usize> {
+    let mut siblings = Vec::new();
+    for &color in pass.colors.iter() {
+        siblings.extend(
+            passes
+                .iter()
+                .enumerate()
+                .filter(|p| p.1.colors.iter().any(|&a| a == color))
+                .map(|p| p.0),
+        );
     }
-    attachments.sort_by_key(|a| a as *const _);
-    attachments.dedup_by_key(|a| a as *const _);
-    attachments
+    if let Some(depth_stencil) = pass.depth_stencil {
+        siblings.extend(
+            passes
+                .iter()
+                .enumerate()
+                .filter(|p| {
+                    p.1
+                        .depth_stencil
+                        .as_ref()
+                        .map_or(false, |&a| a == depth_stencil)
+                })
+                .map(|p| p.0),
+        );
+    }
+    siblings.sort();
+    siblings.dedup();
+    siblings
 }
+
+/// Get dependencies of pass. And dependencies of dependencies.
+fn dependencies<P>(
+    passes: &[PassBuilder<P>],
+    pass: &PassBuilder<P>,
+) -> Vec<usize> {
+    let mut deps = direct_dependencies(passes, pass);
+    deps = deps.into_iter()
+        .flat_map(|dep| dependencies(passes, &passes[dep]))
+        .collect();
+    deps.sort();
+    deps.dedup();
+    deps
+}
+
+
 
 fn create_target<B, A, I, E>(
     format: Format,
@@ -531,21 +541,20 @@ fn create_target<B, A, I, E>(
     views: &mut Vec<B::ImageView>,
     extent: Extent,
     frames: usize,
-    depth: bool,
-) -> Result<Range<usize>, E>
+) -> Result<(), E>
 where
     B: Backend,
     A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
     I: Borrow<B::Image>,
 {
+    debug!("Create target with format: {:#?}", format);
     let kind = Kind::D2(extent.width as u16, extent.height as u16, AaMode::Single);
-    let start = views.len();
     for _ in 0..frames {
         let image = allocator(
             kind,
             1,
             format,
-            if depth {
+            if format.aspect_flags().contains(AspectFlags::DEPTH) {
                 Usage::DEPTH_STENCIL_ATTACHMENT
             } else {
                 Usage::COLOR_ATTACHMENT
@@ -563,103 +572,5 @@ where
         views.push(view);
         images.push(image);
     }
-    Ok(start..views.len())
-}
-
-/// Get dependencies of pass.
-fn direct_dependencies<'a, B, T>(
-    passes: &'a [PassBuilder<'a, B, T>],
-    pass: &'a PassBuilder<'a, B, T>,
-) -> Vec<usize>
-where
-    B: Backend,
-{
-    let mut deps = Vec::new();
-    for input in pass.inputs.iter().chain(&pass.sampled) {
-        deps.extend(
-            passes
-                .iter()
-                .enumerate()
-                .filter(|p| {
-                    p.1
-                        .depth_stencil
-                        .as_ref()
-                        .map_or(false, |&a| input.is(Attachment::DepthStencil(a)))
-                        || p.1
-                            .colors
-                            .iter()
-                            .any(|&a| input.is(Attachment::Color(a)))
-                })
-                .map(|p| p.0),
-        );
-    }
-    deps.sort();
-    deps.dedup();
-    deps
-}
-
-/// Get other passes that shares output attachments
-fn siblings<'a, B, T>(
-    passes: &'a [PassBuilder<'a, B, T>],
-    pass: &'a PassBuilder<'a, B, T>,
-) -> Vec<usize>
-where
-    B: Backend,
-{
-    let mut siblings = Vec::new();
-    for &color in pass.colors.iter() {
-        siblings.extend(
-            passes
-                .iter()
-                .enumerate()
-                .filter(|p| p.1.colors.iter().any(|&a| eq(a, color)))
-                .map(|p| p.0),
-        );
-    }
-    if let Some(depth_stencil) = pass.depth_stencil {
-        siblings.extend(
-            passes
-                .iter()
-                .enumerate()
-                .filter(|p| {
-                    p.1
-                        .depth_stencil
-                        .as_ref()
-                        .map_or(false, |&a| eq(a, depth_stencil))
-                })
-                .map(|p| p.0),
-        );
-    }
-    siblings.sort();
-    siblings.dedup();
-    siblings
-}
-
-/// Get dependencies of pass. And dependencies of dependencies.
-fn dependencies<'a, B, T>(
-    passes: &'a [PassBuilder<'a, B, T>],
-    pass: &'a PassBuilder<'a, B, T>,
-) -> Vec<usize>
-where
-    B: Backend,
-{
-    let mut deps = direct_dependencies(passes, pass);
-    deps = deps.into_iter()
-        .flat_map(|dep| dependencies(passes, &passes[dep]))
-        .collect();
-    deps.sort();
-    deps.dedup();
-    deps
-}
-
-/// Check if backbuffer is a collection of images
-/// or external framebuffer.
-fn is_images<B>(backbuffer: &Backbuffer<B>) -> bool
-where
-    B: Backend,
-{
-    match *backbuffer {
-        Backbuffer::Images(_) => true,
-        Backbuffer::Framebuffer(_) => false,
-    }
+    Ok(())
 }

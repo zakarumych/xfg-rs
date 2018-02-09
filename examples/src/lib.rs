@@ -9,23 +9,23 @@ extern crate env_logger;
 extern crate winit;
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use cgmath::{Deg, PerspectiveFov, Matrix4, SquareMatrix};
-use gfx_hal::{Backend, Device, IndexType, Instance, PhysicalDevice, Surface};
-use gfx_hal::buffer::{IndexBufferView, Usage};
-use gfx_hal::command::{CommandBuffer, RenderPassInlineEncoder, Primary, Rect, Viewport};
-use gfx_hal::device::{Extent, ShaderError, WaitFor};
+use gfx_hal::{Backend, Device, Instance, PhysicalDevice, Surface};
+use gfx_hal::command::{Rect, Viewport};
+use gfx_hal::device::{Extent, WaitFor};
 use gfx_hal::format::{ChannelType, Format};
-use gfx_hal::memory::{cast_slice, Pod, Properties};
+use gfx_hal::memory::{Properties};
 use gfx_hal::pool::{CommandPool, CommandPoolCreateFlags};
 use gfx_hal::queue::Graphics;
 use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
 
-use gfx_mem::{Block, Factory, SmartAllocator, Type};
+use gfx_mem::{Factory, SmartAllocator, Type};
 
 use winit::{EventsLoop, WindowBuilder};
 
-use xfg::{ColorAttachment, DepthStencilAttachment, SuperFrame, GraphBuilder};
+use xfg::{Pass, SuperFrame, GraphBuilder};
 
 #[cfg(feature = "dx12")]
 pub extern crate gfx_backend_dx12 as back;
@@ -85,7 +85,6 @@ pub struct Scene<B: Backend, T = ()> {
     pub allocator: SmartAllocator<B>,
 }
 
-
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
 pub fn run<T, Y>(_: T, _: Y) {
     env_logger::init();
@@ -94,9 +93,10 @@ pub fn run<T, Y>(_: T, _: Y) {
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
 #[deny(dead_code)]
-pub fn run<G, F, T>(graph: G, fill: F)
+pub fn run<G, F, P, T>(graph: G, fill: F)
 where
-    G: for<'a> FnOnce(Format, &'a mut Vec<ColorAttachment>, &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, back::Backend, Scene<back::Backend, T>>,
+    G: FnOnce(Format, &mut GraphBuilder<P>),
+    P: Pass<back::Backend, Scene<back::Backend, T>>,
     F: FnOnce(&mut Scene<back::Backend, T>, &<back::Backend as Backend>::Device),
 {
     env_logger::init();
@@ -186,12 +186,11 @@ where
     events_loop.poll_events(|_| ());
 
     let mut graph = {
-        let mut colors = Vec::new();
-        let mut depths = Vec::new();
-        graph(surface_format, &mut colors, &mut depths)
+        let mut builder = GraphBuilder::new();
+        graph(surface_format, &mut builder);
+        builder
             .with_extent(Extent { width: width as u32, height: height as u32, depth: 1 })
-            .with_backbuffer(&backbuffer)
-            .build(&device, |kind, level, format, usage, properties, device| {
+            .build(&device, &backbuffer, |kind, level, format, usage, properties, device| {
                 allocator.create_image(device, (Type::General, properties), kind, level, format, usage)
             }).unwrap()
     };
@@ -230,9 +229,10 @@ where
 
     let mut jobs: Vec<Option<Job<_>>> = (0..buffering).map(|_| None).collect();
 
-    let start = ::std::time::Instant::now();
-    let total = 10000;
-    for _ in 0 .. total {
+    let start = Instant::now();
+    let mut total = 0;
+    let total = loop {
+        total += 1;
         // info!("Iteration: {}", i);
         // info!("Poll events");
         events_loop.poll_events(|_| ());
@@ -296,7 +296,11 @@ where
             finish,
             command_pool,
         });
-    }
+
+        if Instant::now() - start > Duration::from_secs(10) {
+            break total;
+        }
+    };
     
     if !device.wait_for_fences(jobs.iter().filter_map(|job| job.as_ref().map(|job| &job.finish)), WaitFor::All, !0) {
         panic!("Failed to wait for drawing");
@@ -319,7 +323,7 @@ where
         }
     }
 
-    let end = ::std::time::Instant::now();
+    let end = Instant::now();
     let dur = end - start;
     let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1000000000f64);
     info!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());

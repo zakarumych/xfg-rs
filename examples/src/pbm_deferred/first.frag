@@ -17,11 +17,11 @@ layout(binding = 1, set = 0) uniform FragmentArgs {
 layout(location = 0) out vec4 albedo_roughness;
 layout(location = 1) out vec4 emission_metallic;
 layout(location = 2) out vec4 normal_ambient_occlusion;
-layout(location = 3) out vec4 position_depth;
+layout(location = 3) out vec4 position;
 
 void main() {
     albedo_roughness = vec4(albedo, roughness);
     emission_metallic = vec4(emission, metallic);
     normal_ambient_occlusion = vec4(vertex.normal, ambient_occlusion);
-    position_depth = vec4(vertex.position, gl_FragCoord.z);
+    position = vec4(vertex.position, 0.0);
 }

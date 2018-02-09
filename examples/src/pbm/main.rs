@@ -11,7 +11,7 @@ use std::borrow::Borrow;
 use std::ops::{Add, Sub, BitOr};
 use std::sync::Arc;
 
-use cgmath::{Deg, PerspectiveFov, Transform, Matrix4, EuclideanSpace, Point3};
+use cgmath::{Transform, Matrix4, EuclideanSpace, Point3};
 
 use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
@@ -23,7 +23,7 @@ use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorTyp
 use gfx_hal::queue::Transfer;
 use gfx_mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
-use xfg::{DescriptorPool, Pass, ColorAttachment, DepthStencilAttachment, GraphBuilder};
+use xfg::{DescriptorPool, Pass, ColorAttachment, DepthStencilAttachment, GraphBuilder, PassDesc, PassShaders};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -87,14 +87,14 @@ fn pad(value: [f32; 3], pad: f32) -> [f32; 4] {
 #[derive(Debug)]
 struct DrawPbm;
 
-impl<B> Pass<B, Scene<B, ObjectData>> for DrawPbm
-where
-    B: Backend,
-{
+impl PassDesc for DrawPbm {
     /// Name of the pass
     fn name(&self) -> &str {
         "DrawPbm"
     }
+
+    /// Sampled attachment
+    fn sampled(&self) -> usize { 0 }
 
     /// Input attachments
     fn inputs(&self) -> usize { 0 }
@@ -144,7 +144,13 @@ where
             },
         ]
     }
+}
 
+
+impl<B> PassShaders<B> for DrawPbm
+where
+    B: Backend,
+{
     fn shaders<'a>(
         &self,
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
@@ -170,7 +176,13 @@ where
             }),
         })
     }
+}
 
+
+impl<B> Pass<B, Scene<B, ObjectData>> for DrawPbm
+where
+    B: Backend,
+{
     fn prepare<'a>(
         &mut self,
         pool: &mut DescriptorPool<B>,
@@ -290,20 +302,20 @@ where
     }
 }
 
-fn graph<'a, B>(surface_format: Format, colors: &'a mut Vec<ColorAttachment>, depths: &'a mut Vec<DepthStencilAttachment>) -> GraphBuilder<'a, B, Scene<B, ObjectData>>
+fn graph<'a, B>(surface_format: Format, graph: &'a mut GraphBuilder<DrawPbm>)
 where
     B: Backend,
 {
-    colors.push(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
-    depths.push(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
+    let color = graph.add_attachment(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.0, 0.0, 0.0, 1.0])));
+    let depth = graph.add_attachment(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
 
     let pass = DrawPbm.build()
-        .with_color(colors.last().unwrap())
-        .with_depth_stencil(depths.last().unwrap());
+        .with_color(color)
+        .with_depth_stencil(depth);
 
-    GraphBuilder::new()
-        .with_pass(pass)
-        .with_present(colors.last().unwrap())
+    graph
+        .add_pass(pass)
+        .set_present(color);
 }
 
 fn fill<B>(scene: &mut Scene<B, ObjectData>, device: &B::Device)
@@ -377,7 +389,7 @@ fn create_sphere<B>(device: &B::Device, factory: &mut SmartAllocator<B>) -> Mesh
 where
     B: Backend,
 {
-    use genmesh::{EmitTriangles, Polygon, Triangle};
+    use genmesh::{EmitTriangles, Triangle};
     use genmesh::generators::{SphereUV, SharedVertex, IndexedPolygon};
 
     let sphere = SphereUV::new(40, 20);

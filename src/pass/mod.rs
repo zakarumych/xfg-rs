@@ -3,13 +3,14 @@
 pub use self::build::PassBuilder;
 
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
-use gfx_hal::pso::{Comparison, ColorBlendDesc, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
-                   PipelineStage, StencilTest};
+use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
+                   PipelineStage};
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
@@ -19,37 +20,19 @@ use frame::{pick, SuperFrame, SuperFramebuffer};
 
 mod build;
 
-/// `Pass`es are the building blocks a rendering `Graph`.
-///
-/// `Pass` is similar in concept to `gfx_hal::Backend::RenderPass`.
-/// But several `Pass`es may be mapped into a single `RenderPass` as subpasses.
-/// A `Pass` defines its inputs and outputs, and also the required vertex format and bindings.
-///
-/// ### Type parameters:
-///
-/// - `B`: render `Backend`
-/// - `T`: auxiliary data used by the `Pass`, can be anything the `Pass` requires, such as meshes,
-///        caches, etc
-pub trait Pass<B, T>: Debug
-where
-    B: Backend,
-{
+/// Trait provide description of `Pass`.
+pub trait PassDesc: Debug {
     /// Name of the pass
-    fn name(&self) -> &str;
+    fn name<'a>(&'a self) -> &'a str;
 
-    /// Input attachments desired format.
-    ///
-    /// Format of the actual attachment may be different, it may be larger if another consumer
-    /// expects a larger format, or smaller because of hardward limitations.
+    /// Sampled attachments count.
+    fn sampled(&self) -> usize;
+
+    /// Input attachments count.
     fn inputs(&self) -> usize;
 
     /// Number of colors to write
     fn colors(&self) -> usize;
-
-    /// Blending for color attachment
-    fn color_blend(&self, _index: usize) -> ColorBlendDesc {
-        ColorBlendDesc::EMPTY
-    }
 
     /// Will the pass write to the depth buffer
     fn depth(&self) -> bool;
@@ -57,37 +40,38 @@ where
     /// Will the pass use the stencil buffer
     fn stencil(&self) -> bool;
 
-    /// Get depth stencil description
-    fn depth_stencil_desc(&self) -> Option<DepthStencilDesc> {
-        debug_assert!(!self.stencil());
-        if self.depth() {
-            Some(DepthStencilDesc {
-                depth: DepthTest::On {
-                    fun: Comparison::LessEqual,
-                    write: true,
-                },
-                depth_bounds: false,
-                stencil: StencilTest::Off,
-            })
-        } else {
-            None
-        }
-    }
-
     /// Vertex formats required by the pass
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)];
 
     /// Bindings for the descriptor sets used by the pass
     fn bindings(&self) -> &[DescriptorSetLayoutBinding];
 
-    /// Build render pass
-    fn build<'a>(self) -> PassBuilder<'static, B, T>
-    where
-        Self: Sized + 'static,
-    {
+    /// Create builder
+    fn build(self) -> PassBuilder<Self> where Self: Sized {
         PassBuilder::new(self)
     }
+}
 
+impl<P, Y> PassDesc for Y
+where
+    Y: Debug + Deref<Target=P>,
+    P: PassDesc + ?Sized + 'static,
+{
+    fn name<'a>(&'a self) -> &str { P::name(self) }
+    fn sampled(&self) -> usize { P::sampled(self) }
+    fn inputs(&self) -> usize { P::inputs(self) }
+    fn colors(&self) -> usize { P::colors(self) }
+    fn depth(&self) -> bool { P::depth(self) }
+    fn stencil(&self) -> bool { P::stencil(self) }
+    fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] { P::vertices(self) }
+    fn bindings(&self) -> &[DescriptorSetLayoutBinding] { P::bindings(self) }
+}
+
+/// Trait to load shaders for `Pass`.
+pub trait PassShaders<B>: PassDesc
+where
+    B: Backend,
+{
     /// Load shaders
     ///
     /// This function gets called during the `Graph` build process, and is expected to load the
@@ -108,7 +92,38 @@ where
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
         device: &B::Device,
     ) -> Result<GraphicsShaderSet<'a, B>, ShaderError>;
+}
 
+impl<B, P, Y> PassShaders<B> for Y
+where
+    B: Backend,
+    Y: Debug + Deref<Target=P>,
+    P: PassShaders<B> + ?Sized + 'static,
+{
+    fn shaders<'a>(
+        &'a self,
+        shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
+        device: &B::Device,
+    ) -> Result<GraphicsShaderSet<'a, B>, ShaderError> {
+        P::shaders(self, shaders, device)
+    }
+}
+
+/// `Pass`es are the building blocks a rendering `Graph`.
+///
+/// `Pass` is similar in concept to `gfx_hal::Backend::RenderPass`.
+/// But several `Pass`es may be mapped into a single `RenderPass` as subpasses.
+/// A `Pass` defines its inputs and outputs, and also the required vertex format and bindings.
+///
+/// ### Type parameters:
+///
+/// - `B`: render `Backend`
+/// - `T`: auxiliary data used by the `Pass`, can be anything the `Pass` requires, such as meshes,
+///        caches, etc
+pub trait Pass<B, T>: PassShaders<B>
+where
+    B: Backend,
+{
     /// Make preparation for actual drawing commands.
     ///
     /// Examples of tasks that should be performed during the preparation phase:
@@ -169,6 +184,41 @@ where
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T);
 }
 
+impl<B, P, T, Y> Pass<B, T> for Y
+where
+    B: Backend,
+    Y: Debug + DerefMut<Target=P>,
+    P: Pass<B, T> + ?Sized + 'static,
+{
+    fn prepare<'a>(
+        &mut self,
+        pool: &mut DescriptorPool<B>,
+        cbuf: &mut CommandBuffer<B, Transfer>,
+        device: &B::Device,
+        inputs: &[&B::Image],
+        frame: usize,
+        aux: &mut T,
+    ) {
+        P::prepare(self, pool, cbuf, device, inputs, frame, aux)
+    }
+
+    fn draw_inline<'a>(
+        &mut self,
+        layout: &B::PipelineLayout,
+        encoder: RenderPassInlineEncoder<B, Primary>,
+        device: &B::Device,
+        inputs: &[&B::Image],
+        frame: usize,
+        aux: &T,
+    ) {
+        P::draw_inline(self, layout, encoder, device, inputs, frame, aux)
+    }
+    
+    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T) {
+        P::cleanup(self, pool, device, aux)
+    }
+}
+
 /// Single node in the rendering graph.
 /// Nodes can use output of other nodes as input, such a connection is called a `dependency`.
 ///
@@ -178,19 +228,19 @@ where
 /// - `T`: auxiliary data used by the `Pass`, can be anything the `Pass` requires, such as meshes,
 ///        caches, etc
 #[derive(Debug)]
-pub(crate) struct PassNode<B: Backend, T> {
+pub(crate) struct PassNode<B: Backend, P> {
     clears: Vec<ClearValue>,
     descriptors: DescriptorPool<B>,
     pipeline_layout: B::PipelineLayout,
     graphics_pipeline: B::GraphicsPipeline,
     renderpass: B::RenderPass,
     framebuffer: SuperFramebuffer<B>,
-    pass: Box<Pass<B, T>>,
+    pass: P,
     inputs: Vec<Vec<*const B::Image>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
 }
 
-impl<B, T> PassNode<B, T>
+impl<B, P> PassNode<B, P>
 where
     B: Backend,
 {
@@ -208,9 +258,10 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn prepare<C>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, frame: SuperFrame<B>, aux: &mut T)
+    pub fn prepare<C, T>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, frame: SuperFrame<B>, aux: &mut T)
     where
         C: Supports<Transfer>,
+        P: Pass<B, T>,
     {
         // Collecting those seems too slow.
         // This is safe due to `Image`s must be alive as long as whole
@@ -244,7 +295,7 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn draw_inline<C>(
+    pub fn draw_inline<C, T>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
         device: &B::Device,
@@ -253,6 +304,7 @@ where
         aux: &T,
     ) where
         C: Supports<Graphics>,
+        P: Pass<B, T>,
     {
         // Bind pipeline
         cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
@@ -291,7 +343,10 @@ where
     ///
     /// - `device`: graphics device
     /// - `aux`: auxiliary data for the inner `Pass`
-    pub fn dispose(mut self, device: &B::Device, aux: &mut T) {
+    pub fn dispose<T>(mut self, device: &B::Device, aux: &mut T)
+    where
+        P: Pass<B, T>,
+    {
         self.pass.cleanup(&mut self.descriptors, device, aux);
         match self.framebuffer {
             SuperFramebuffer::Owned(framebuffers) => for framebuffer in framebuffers {
