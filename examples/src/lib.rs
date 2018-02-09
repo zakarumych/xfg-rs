@@ -1,22 +1,22 @@
-
 pub extern crate cgmath;
 pub extern crate gfx_hal;
 pub extern crate gfx_mem;
 pub extern crate xfg;
 
-#[macro_use] extern crate log;
 extern crate env_logger;
+#[macro_use]
+extern crate log;
 extern crate winit;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use cgmath::{Deg, PerspectiveFov, Matrix4, SquareMatrix};
+use cgmath::{Deg, Matrix4, PerspectiveFov, SquareMatrix};
 use gfx_hal::{Backend, Device, Instance, PhysicalDevice, Surface};
 use gfx_hal::command::{Rect, Viewport};
 use gfx_hal::device::{Extent, WaitFor};
 use gfx_hal::format::{ChannelType, Format};
-use gfx_hal::memory::{Properties};
+use gfx_hal::memory::Properties;
 use gfx_hal::pool::{CommandPool, CommandPoolCreateFlags};
 use gfx_hal::queue::Graphics;
 use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
@@ -25,19 +25,18 @@ use gfx_mem::{Factory, SmartAllocator, Type};
 
 use winit::{EventsLoop, WindowBuilder};
 
-use xfg::{Pass, SuperFrame, GraphBuilder};
+use xfg::{GraphBuilder, Pass, SuperFrame};
 
 #[cfg(feature = "dx12")]
 pub extern crate gfx_backend_dx12 as back;
-#[cfg(feature = "metal")]
-pub extern crate gfx_backend_metal as back;
-#[cfg(feature = "gl")]
-pub extern crate gfx_backend_gl as back;
-#[cfg(feature = "vulkan")]
-pub extern crate gfx_backend_vulkan as back;
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
 pub extern crate gfx_backend_empty as back;
-
+#[cfg(feature = "gl")]
+pub extern crate gfx_backend_gl as back;
+#[cfg(feature = "metal")]
+pub extern crate gfx_backend_metal as back;
+#[cfg(feature = "vulkan")]
+pub extern crate gfx_backend_vulkan as back;
 
 pub type Buffer<B> = <SmartAllocator<B> as Factory<B>>::Buffer;
 pub type Image<B> = <SmartAllocator<B> as Factory<B>>::Image;
@@ -88,7 +87,9 @@ pub struct Scene<B: Backend, T = ()> {
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
 pub fn run<T, Y>(_: T, _: Y) {
     env_logger::init();
-    error!("You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example");
+    error!(
+        "You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example"
+    );
 }
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
@@ -111,16 +112,12 @@ where
         .with_title("flat".to_string());
 
     #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
-    let window = wb
-        .build(&events_loop)
-        .unwrap();
+    let window = wb.build(&events_loop).unwrap();
     #[cfg(feature = "gl")]
     let window = {
-        let builder = back::config_context(
-            back::glutin::ContextBuilder::new(),
-            Format::Rgba8Srgb,
-            None,
-        ).with_vsync(true);
+        let builder =
+            back::config_context(back::glutin::ContextBuilder::new(), Format::Rgba8Srgb, None)
+                .with_vsync(true);
         back::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
     };
 
@@ -129,7 +126,7 @@ where
     let (width, height) = window.get_inner_size().unwrap();
     let hidpi = window.hidpi_factor();
     info!("Width: {}, Height: {}, HIDPI: {}", width, height, hidpi);
-    
+
     #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
     let (_instance, adapter, mut surface) = {
         let instance = back::Instance::create("gfx-rs quad", 1);
@@ -149,29 +146,27 @@ where
     let surface_format = surface
         .capabilities_and_formats(&adapter.physical_device)
         .1
-        .and_then(
-            |formats| {
-                formats
-                    .into_iter()
-                    .find(|format| {
-                        format.base_format().1 == ChannelType::Srgb
-                    })
-            }
-        ).unwrap_or(Format::Rgba8Srgb);
+        .and_then(|formats| {
+            formats
+                .into_iter()
+                .find(|format| format.base_format().1 == ChannelType::Srgb)
+        })
+        .unwrap_or(Format::Rgba8Srgb);
 
-    let memory_properties = adapter
-        .physical_device
-        .memory_properties();
+    let memory_properties = adapter.physical_device.memory_properties();
 
-    let mut allocator = SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 1024 * 1024 * 64);
+    let mut allocator =
+        SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 1024 * 1024 * 64);
 
-    info!("Device features: {:#?}", adapter.physical_device.get_features());
+    info!(
+        "Device features: {:#?}",
+        adapter.physical_device.get_features()
+    );
     info!("Device limits: {:#?}", adapter.physical_device.get_limits());
 
-    let (device, mut queue_group) =
-        adapter.open_with::<_, Graphics>(1, |family| {
-            surface.supports_queue_family(family)
-        }).unwrap();
+    let (device, mut queue_group) = adapter
+        .open_with::<_, Graphics>(1, |family| surface.supports_queue_family(family))
+        .unwrap();
 
     let buffering = 3;
 
@@ -180,7 +175,11 @@ where
         .with_image_count(buffering);
     let (mut swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
 
-    let mut command_pools = (0..buffering).map(|_| device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)).collect::<Vec<_>>();
+    let mut command_pools = (0..buffering)
+        .map(|_| {
+            device.create_command_pool_typed(&queue_group, CommandPoolCreateFlags::empty(), 16)
+        })
+        .collect::<Vec<_>>();
     let mut command_queue = &mut queue_group.queues[0];
 
     events_loop.poll_events(|_| ());
@@ -189,10 +188,26 @@ where
         let mut builder = GraphBuilder::new();
         graph(surface_format, &mut builder);
         builder
-            .with_extent(Extent { width: width as u32, height: height as u32, depth: 1 })
-            .build(&device, &backbuffer, |kind, level, format, usage, properties, device| {
-                allocator.create_image(device, (Type::General, properties), kind, level, format, usage)
-            }).unwrap()
+            .with_extent(Extent {
+                width: width as u32,
+                height: height as u32,
+                depth: 1,
+            })
+            .build(
+                &device,
+                &backbuffer,
+                |kind, level, format, usage, properties, device| {
+                    allocator.create_image(
+                        device,
+                        (Type::General, properties),
+                        kind,
+                        level,
+                        format,
+                        usage,
+                    )
+                },
+            )
+            .unwrap()
     };
 
     let projection: Matrix4<f32> = PerspectiveFov {
@@ -216,9 +231,15 @@ where
     // fill scene
     fill(&mut scene, &device);
 
-    let mut acquires = (0..buffering+1).map(|_| device.create_semaphore()).collect::<Vec<_>>();
-    let mut releases = (0..buffering).map(|_| device.create_semaphore()).collect::<Vec<_>>();
-    let mut finishes = (0..buffering).map(|_| device.create_fence(false)).collect::<Vec<_>>();
+    let mut acquires = (0..buffering + 1)
+        .map(|_| device.create_semaphore())
+        .collect::<Vec<_>>();
+    let mut releases = (0..buffering)
+        .map(|_| device.create_semaphore())
+        .collect::<Vec<_>>();
+    let mut finishes = (0..buffering)
+        .map(|_| device.create_fence(false))
+        .collect::<Vec<_>>();
 
     struct Job<B: Backend> {
         acquire: B::Semaphore,
@@ -281,7 +302,7 @@ where
                     w: width as u16,
                     h: height as u16,
                 },
-                depth: 0.0 .. 1.0,
+                depth: 0.0..1.0,
             },
             &finish,
             &device,
@@ -301,13 +322,21 @@ where
             break total;
         }
     };
-    
-    if !device.wait_for_fences(jobs.iter().filter_map(|job| job.as_ref().map(|job| &job.finish)), WaitFor::All, !0) {
+
+    if !device.wait_for_fences(
+        jobs.iter()
+            .filter_map(|job| job.as_ref().map(|job| &job.finish)),
+        WaitFor::All,
+        !0,
+    ) {
         panic!("Failed to wait for drawing");
     }
-    device.reset_fences(jobs.iter().filter_map(|job| job.as_ref().map(|job| &job.finish)));
-    
-    for id in 0 .. jobs.len() {
+    device.reset_fences(
+        jobs.iter()
+            .filter_map(|job| job.as_ref().map(|job| &job.finish)),
+    );
+
+    for id in 0..jobs.len() {
         if let Some(mut job) = jobs[id].take() {
             job.command_pool.reset();
 

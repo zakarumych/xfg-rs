@@ -11,11 +11,9 @@ use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
 
-use attachment::{Attachment, AttachmentRef, AttachmentDesc};
+use attachment::{Attachment, AttachmentDesc, AttachmentRef};
 use graph::Graph;
-use pass::{PassBuilder, PassShaders, PassNode};
-
-
+use pass::{PassBuilder, PassNode, PassShaders};
 
 /// Possible errors during graph building
 #[derive(Debug, Clone)]
@@ -74,7 +72,9 @@ where
                 fmt.write_str("Presentation attachment wasn't set in GraphBuilder")
             }
             GraphBuildError::AllocationError(ref error) => write!(fmt, "{}", error),
-            GraphBuildError::InvalidConfiguaration => write!(fmt, "Graph has invalid configuration"),
+            GraphBuildError::InvalidConfiguaration => {
+                write!(fmt, "Graph has invalid configuration")
+            }
             GraphBuildError::Other => fmt.write_str("Unknown error has occured"),
         }
     }
@@ -126,11 +126,11 @@ impl<P> GraphBuilder<P> {
     }
 
     /// Add an `Attachment` to the `Graph` and return a value to reference added attachment.
-    /// 
+    ///
     /// ### Parameters:
-    /// 
+    ///
     /// - `attachment`: attachment description.
-    /// 
+    ///
     pub fn add_attachment<A>(&mut self, attachment: A) -> AttachmentRef
     where
         A: Into<Attachment>,
@@ -140,19 +140,20 @@ impl<P> GraphBuilder<P> {
     }
 
     /// Add a few `Attachment`s to the `Graph` and return an iterator of references to added attachment.
-    /// 
+    ///
     /// ### Parameters:
-    /// 
+    ///
     /// - `attachments`: iterator that yields attachment descriptions.
-    /// 
+    ///
     pub fn add_attachments<I, A>(&mut self, attachments: I) -> Range<AttachmentRef>
     where
-        I: IntoIterator<Item=A>,
+        I: IntoIterator<Item = A>,
         A: Into<Attachment>,
     {
         let start = self.attachments.len();
-        self.attachments.extend(attachments.into_iter().map(Into::into));
-        AttachmentRef(start) .. AttachmentRef(self.attachments.len())
+        self.attachments
+            .extend(attachments.into_iter().map(Into::into));
+        AttachmentRef(start)..AttachmentRef(self.attachments.len())
     }
 
     /// Add a `Pass` to the `Graph`
@@ -268,8 +269,9 @@ impl<P> GraphBuilder<P> {
             Backbuffer::Framebuffer(_) => (vec![], 1),
         };
 
-        let mut attachments = self.attachments.into_iter().map(|a| {
-            AttachmentDesc {
+        let mut attachments = self.attachments
+            .into_iter()
+            .map(|a| AttachmentDesc {
                 format: a.format,
                 clear: a.clear,
                 write: None,
@@ -277,10 +279,10 @@ impl<P> GraphBuilder<P> {
                 images: None,
                 views: None,
                 is_surface: false,
-            }
-        }).collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
-        attachments[present.0].views = Some(0 .. image_views.len());
+        attachments[present.0].views = Some(0..image_views.len());
         attachments[present.0].is_surface = true;
 
         info!("Reorder passes to maximize overlapping");
@@ -300,7 +302,10 @@ impl<P> GraphBuilder<P> {
                 debug_assert!(sampled.write.is_some());
                 debug_assert!(sampled.views.is_some());
                 debug_assert!(sampled.images.is_some());
-                sampled.read.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                sampled
+                    .read
+                    .get_or_insert_with(|| pass_index..pass_index)
+                    .end = pass_index;
             }
 
             info!("Check sampled targets");
@@ -309,7 +314,10 @@ impl<P> GraphBuilder<P> {
                 debug_assert!(sampled.write.is_some());
                 debug_assert!(sampled.views.is_some());
                 debug_assert!(sampled.images.is_some());
-                sampled.read.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                sampled
+                    .read
+                    .get_or_insert_with(|| pass_index..pass_index)
+                    .end = pass_index;
             }
 
             info!("Check input targets");
@@ -318,13 +326,16 @@ impl<P> GraphBuilder<P> {
                 debug_assert!(input.write.is_some());
                 debug_assert!(input.views.is_some());
                 debug_assert!(input.images.is_some());
-                input.read.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                input.read.get_or_insert_with(|| pass_index..pass_index).end = pass_index;
             }
 
             info!("Create color targets");
             for &color in &pass.colors {
                 let ref mut color = attachments[color.0.index()];
-                color.write.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                color
+                    .write
+                    .get_or_insert_with(|| pass_index..pass_index)
+                    .end = pass_index;
                 if color.views.is_none() {
                     debug_assert!(color.images.is_none());
                     create_target::<B, _, I, E>(
@@ -336,15 +347,18 @@ impl<P> GraphBuilder<P> {
                         self.extent,
                         frames,
                     ).map_err(GraphBuildError::AllocationError)?;
-                    color.views = Some((image_views.len() - frames .. image_views.len()));
-                    color.images = Some((images.len() - frames .. images.len()));
+                    color.views = Some((image_views.len() - frames..image_views.len()));
+                    color.images = Some((images.len() - frames..images.len()));
                 }
             }
 
             info!("Create depth-stencil target");
             if let Some(depth_stencil) = pass.depth_stencil {
                 let ref mut depth_stencil = attachments[depth_stencil.0.index()];
-                depth_stencil.write.get_or_insert_with(|| pass_index .. pass_index).end = pass_index;
+                depth_stencil
+                    .write
+                    .get_or_insert_with(|| pass_index..pass_index)
+                    .end = pass_index;
                 if depth_stencil.views.is_none() {
                     debug_assert!(depth_stencil.images.is_none());
                     create_target::<B, _, I, E>(
@@ -356,15 +370,21 @@ impl<P> GraphBuilder<P> {
                         self.extent,
                         frames,
                     ).map_err(GraphBuildError::AllocationError)?;
-                    depth_stencil.views = Some((image_views.len() - frames .. image_views.len()));
-                    depth_stencil.images = Some((images.len() - frames .. images.len()));
+                    depth_stencil.views = Some((image_views.len() - frames..image_views.len()));
+                    depth_stencil.images = Some((images.len() - frames..images.len()));
                 }
             }
         }
 
         for ((pass_index, pass), last_dep) in passes.into_iter().enumerate().zip(deps) {
-            let mut node =
-                pass.build(device, self.extent, &attachments, &image_views, &images, pass_index)?;
+            let mut node = pass.build(
+                device,
+                self.extent,
+                &attachments,
+                &image_views,
+                &images,
+                pass_index,
+            )?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -458,10 +478,7 @@ fn reorder_passes<P>(
 }
 
 /// Get dependencies of pass.
-fn direct_dependencies<P>(
-    passes: &[PassBuilder<P>],
-    pass: &PassBuilder<P>,
-) -> Vec<usize> {
+fn direct_dependencies<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usize> {
     let mut deps = Vec::new();
     for &input in pass.inputs.iter().chain(&pass.sampled) {
         deps.extend(
@@ -470,10 +487,7 @@ fn direct_dependencies<P>(
                 .enumerate()
                 .filter(|p| {
                     p.1.depth_stencil.map(|(a, _)| a) == Some(input)
-                        || p.1
-                            .colors
-                            .iter()
-                            .any(|&(a, _)| input == a)
+                        || p.1.colors.iter().any(|&(a, _)| input == a)
                 })
                 .map(|p| p.0),
         );
@@ -484,10 +498,7 @@ fn direct_dependencies<P>(
 }
 
 /// Get other passes that shares output attachments
-fn siblings<P>(
-    passes: &[PassBuilder<P>],
-    pass: &PassBuilder<P>,
-) -> Vec<usize> {
+fn siblings<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usize> {
     let mut siblings = Vec::new();
     for &color in pass.colors.iter() {
         siblings.extend(
@@ -518,10 +529,7 @@ fn siblings<P>(
 }
 
 /// Get dependencies of pass. And dependencies of dependencies.
-fn dependencies<P>(
-    passes: &[PassBuilder<P>],
-    pass: &PassBuilder<P>,
-) -> Vec<usize> {
+fn dependencies<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usize> {
     let mut deps = direct_dependencies(passes, pass);
     deps = deps.into_iter()
         .flat_map(|dep| dependencies(passes, &passes[dep]))
@@ -530,8 +538,6 @@ fn dependencies<P>(
     deps.dedup();
     deps
 }
-
-
 
 fn create_target<B, A, I, E>(
     format: Format,
@@ -563,11 +569,16 @@ where
             device,
         )?;
         let view = device
-            .create_image_view(image.borrow(), format, Swizzle::NO, SubresourceRange {
-                aspects: format.aspect_flags(),
-                layers: 0..1,
-                levels: 0..1,
-            })
+            .create_image_view(
+                image.borrow(),
+                format,
+                Swizzle::NO,
+                SubresourceRange {
+                    aspects: format.aspect_flags(),
+                    layers: 0..1,
+                    levels: 0..1,
+                },
+            )
             .expect("Views are expected to be created");
         views.push(view);
         images.push(image);

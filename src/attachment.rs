@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use gfx_hal::command::{ClearColor, ClearValue, ClearDepthStencil};
+use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::format::{AspectFlags, Format};
 use gfx_hal::image::ImageLayout;
 use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
@@ -100,7 +100,6 @@ impl AttachmentRef {
     }
 }
 
-
 #[derive(Debug)]
 pub(crate) struct AttachmentDesc {
     pub(crate) format: Format,
@@ -143,8 +142,12 @@ impl AttachmentDesc {
 
     pub(crate) fn store_op(&self, index: usize) -> AttachmentStoreOp {
         if self.is_last_touch(index) && !self.is_surface {
-            if self.is_last_write(index) && !self.format.aspect_flags().contains(AspectFlags::DEPTH) {
-                warn!("Pass at index {} writes to an attachment and nobody reads it", index);
+            if self.is_last_write(index) && !self.format.aspect_flags().contains(AspectFlags::DEPTH)
+            {
+                warn!(
+                    "Pass at index {} writes to an attachment and nobody reads it",
+                    index
+                );
             }
             AttachmentStoreOp::DontCare
         } else {
@@ -163,6 +166,6 @@ impl AttachmentDesc {
         } else {
             ImageLayout::General
         };
-        start .. end
+        start..end
     }
 }

@@ -47,24 +47,43 @@ pub trait PassDesc: Debug {
     fn bindings(&self) -> &[DescriptorSetLayoutBinding];
 
     /// Create builder
-    fn build(self) -> PassBuilder<Self> where Self: Sized {
+    fn build(self) -> PassBuilder<Self>
+    where
+        Self: Sized,
+    {
         PassBuilder::new(self)
     }
 }
 
 impl<P, Y> PassDesc for Y
 where
-    Y: Debug + Deref<Target=P>,
+    Y: Debug + Deref<Target = P>,
     P: PassDesc + ?Sized + 'static,
 {
-    fn name<'a>(&'a self) -> &str { P::name(self) }
-    fn sampled(&self) -> usize { P::sampled(self) }
-    fn inputs(&self) -> usize { P::inputs(self) }
-    fn colors(&self) -> usize { P::colors(self) }
-    fn depth(&self) -> bool { P::depth(self) }
-    fn stencil(&self) -> bool { P::stencil(self) }
-    fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] { P::vertices(self) }
-    fn bindings(&self) -> &[DescriptorSetLayoutBinding] { P::bindings(self) }
+    fn name<'a>(&'a self) -> &str {
+        P::name(self)
+    }
+    fn sampled(&self) -> usize {
+        P::sampled(self)
+    }
+    fn inputs(&self) -> usize {
+        P::inputs(self)
+    }
+    fn colors(&self) -> usize {
+        P::colors(self)
+    }
+    fn depth(&self) -> bool {
+        P::depth(self)
+    }
+    fn stencil(&self) -> bool {
+        P::stencil(self)
+    }
+    fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] {
+        P::vertices(self)
+    }
+    fn bindings(&self) -> &[DescriptorSetLayoutBinding] {
+        P::bindings(self)
+    }
 }
 
 /// Trait to load shaders for `Pass`.
@@ -97,7 +116,7 @@ where
 impl<B, P, Y> PassShaders<B> for Y
 where
     B: Backend,
-    Y: Debug + Deref<Target=P>,
+    Y: Debug + Deref<Target = P>,
     P: PassShaders<B> + ?Sized + 'static,
 {
     fn shaders<'a>(
@@ -187,7 +206,7 @@ where
 impl<B, P, T, Y> Pass<B, T> for Y
 where
     B: Backend,
-    Y: Debug + DerefMut<Target=P>,
+    Y: Debug + DerefMut<Target = P>,
     P: Pass<B, T> + ?Sized + 'static,
 {
     fn prepare<'a>(
@@ -213,7 +232,7 @@ where
     ) {
         P::draw_inline(self, layout, encoder, device, inputs, frame, aux)
     }
-    
+
     fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T) {
         P::cleanup(self, pool, device, aux)
     }
@@ -258,8 +277,13 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn prepare<C, T>(&mut self, cbuf: &mut CommandBuffer<B, C>, device: &B::Device, frame: SuperFrame<B>, aux: &mut T)
-    where
+    pub fn prepare<C, T>(
+        &mut self,
+        cbuf: &mut CommandBuffer<B, C>,
+        device: &B::Device,
+        frame: SuperFrame<B>,
+        aux: &mut T,
+    ) where
         C: Supports<Transfer>,
         P: Pass<B, T>,
     {
@@ -277,8 +301,14 @@ where
         // * Write descriptor sets
         // * Store caches
         // * Bind pipeline layout with descriptors sets
-        self.pass
-            .prepare(&mut self.descriptors, cbuf.downgrade(), device, inputs, frame.index(), aux);
+        self.pass.prepare(
+            &mut self.descriptors,
+            cbuf.downgrade(),
+            device,
+            inputs,
+            frame.index(),
+            aux,
+        );
     }
 
     /// Binds pipeline and renderpass to the command buffer `cbuf`.
@@ -330,8 +360,14 @@ where
         };
 
         // Record custom drawing calls
-        self.pass
-            .draw_inline(&self.pipeline_layout, encoder, device, inputs, frame.index(), aux);
+        self.pass.draw_inline(
+            &self.pipeline_layout,
+            encoder,
+            device,
+            inputs,
+            frame.index(),
+            aux,
+        );
     }
 
     /// Dispose of all internal data created by the pass.

@@ -1,5 +1,3 @@
-
-
 // #![deny(unused_imports)]
 #![deny(unused_must_use)]
 #![allow(dead_code)]
@@ -11,19 +9,23 @@ use xfg_examples::*;
 use std::borrow::Borrow;
 use std::sync::Arc;
 
-use cgmath::{Deg, Transform, Matrix4};
+use cgmath::{Deg, Matrix4, Transform};
 
 use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
-use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, RenderPassInlineEncoder, Primary};
+use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
+                       RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::memory::{cast_slice, Pod};
-use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, DescriptorWrite, Element, ElemStride, EntryPoint, GraphicsShaderSet, ShaderStageFlags, VertexBufferSet};
+use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
+                   DescriptorWrite, ElemStride, Element, EntryPoint, GraphicsShaderSet,
+                   ShaderStageFlags, VertexBufferSet};
 use gfx_hal::queue::Transfer;
 use gfx_mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
-use xfg::{DescriptorPool, Pass, PassDesc, PassShaders, ColorAttachment, DepthStencilAttachment, GraphBuilder};
+use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
+          PassShaders};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,19 +47,29 @@ impl PassDesc for DrawFlat {
     }
 
     /// Sampled attachments
-    fn sampled(&self) -> usize { 0 }
+    fn sampled(&self) -> usize {
+        0
+    }
 
     /// Input attachments
-    fn inputs(&self) -> usize { 0 }
+    fn inputs(&self) -> usize {
+        0
+    }
 
     /// Color attachments
-    fn colors(&self) -> usize { 1 }
+    fn colors(&self) -> usize {
+        1
+    }
 
     /// Uses depth attachment
-    fn depth(&self) -> bool { true }
+    fn depth(&self) -> bool {
+        true
+    }
 
     /// Uses stencil attachment
-    fn stencil(&self) -> bool { false }
+    fn stencil(&self) -> bool {
+        false
+    }
 
     /// Vertices format
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] {
@@ -74,7 +86,7 @@ impl PassDesc for DrawFlat {
                     },
                 ],
                 28,
-            )
+            ),
         ]
     }
 
@@ -85,7 +97,7 @@ impl PassDesc for DrawFlat {
                 ty: DescriptorType::UniformBuffer,
                 count: 1,
                 stage_flags: ShaderStageFlags::VERTEX,
-            }
+            },
         ]
     }
 }
@@ -133,8 +145,7 @@ where
         _inputs: &[&B::Image],
         frame: usize,
         scene: &mut Scene<B>,
-    )
-    {
+    ) {
         let ref mut allocator = scene.allocator;
         let view = scene.camera.transform.inverse_transform().unwrap();
 
@@ -146,19 +157,28 @@ where
                 view,
             };
 
-            let grow = (obj.cache.len() .. frame + 1).map(|_| None);
+            let grow = (obj.cache.len()..frame + 1).map(|_| None);
             obj.cache.extend(grow);
-            
+
             let cache = obj.cache[frame].get_or_insert_with(|| {
                 let size = ::std::mem::size_of::<TrProjView>() as u64;
-                let buffer = allocator.create_buffer(device, REQUEST_DEVICE_LOCAL, size, Usage::UNIFORM | Usage::TRANSFER_DST).unwrap();
+                let buffer = allocator
+                    .create_buffer(
+                        device,
+                        REQUEST_DEVICE_LOCAL,
+                        size,
+                        Usage::UNIFORM | Usage::TRANSFER_DST,
+                    )
+                    .unwrap();
                 let set = pool.allocate(device);
-                device.update_descriptor_sets(&[DescriptorSetWrite {
-                    set: &set,
-                    binding: 0,
-                    array_offset: 0,
-                    write: DescriptorWrite::UniformBuffer(vec![(buffer.borrow(), 0 .. size)]),
-                }]);
+                device.update_descriptor_sets(&[
+                    DescriptorSetWrite {
+                        set: &set,
+                        binding: 0,
+                        array_offset: 0,
+                        write: DescriptorWrite::UniformBuffer(vec![(buffer.borrow(), 0..size)]),
+                    },
+                ]);
                 Cache {
                     uniforms: vec![buffer],
                     views: Vec::new(),
@@ -177,20 +197,20 @@ where
         _inputs: &[&B::Image],
         frame: usize,
         scene: &Scene<B>,
-    ) {       
+    ) {
         for object in &scene.objects {
-            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&object.cache[frame].as_ref().unwrap().set));
+            encoder.bind_graphics_descriptor_sets(
+                layout,
+                0,
+                Some(&object.cache[frame].as_ref().unwrap().set),
+            );
             encoder.bind_index_buffer(IndexBufferView {
                 buffer: object.mesh.indices.borrow(),
                 offset: 0,
                 index_type: IndexType::U16,
             });
             encoder.bind_vertex_buffers(VertexBufferSet(vec![(object.mesh.vertices.borrow(), 0)]));
-            encoder.draw_indexed(
-                0 .. object.mesh.index_count,
-                0,
-                0 .. 1,
-            );
+            encoder.draw_indexed(0..object.mesh.index_count, 0, 0..1);
         }
     }
 
@@ -328,11 +348,20 @@ where
 
     let vertices: &[u8] = cast_slice(&vertices);
 
-    let buffer = factory.create_buffer(device, REQUEST_CPU_VISIBLE, vertices.len() as u64, Usage::VERTEX).unwrap();
+    let buffer = factory
+        .create_buffer(
+            device,
+            REQUEST_CPU_VISIBLE,
+            vertices.len() as u64,
+            Usage::VERTEX,
+        )
+        .unwrap();
     {
         let start = buffer.range().start;
         let end = start + vertices.len() as u64;
-        let mut writer = device.acquire_mapping_writer(buffer.memory(), start .. end).unwrap();
+        let mut writer = device
+            .acquire_mapping_writer(buffer.memory(), start..end)
+            .unwrap();
         writer.copy_from_slice(vertices);
         device.release_mapping_writer(writer);
     }
@@ -364,9 +393,18 @@ where
 
     let indices: &[u8] = cast_slice(&indices);
 
-    let buffer = factory.create_buffer(device, REQUEST_CPU_VISIBLE, indices.len() as u64, Usage::INDEX).unwrap();
+    let buffer = factory
+        .create_buffer(
+            device,
+            REQUEST_CPU_VISIBLE,
+            indices.len() as u64,
+            Usage::INDEX,
+        )
+        .unwrap();
     {
-        let mut writer = device.acquire_mapping_writer(buffer.memory(), buffer.range()).unwrap();
+        let mut writer = device
+            .acquire_mapping_writer(buffer.memory(), buffer.range())
+            .unwrap();
         writer.copy_from_slice(indices);
         device.release_mapping_writer(writer);
     }
@@ -384,16 +422,16 @@ fn graph<B>(surface_format: Format, graph: &mut GraphBuilder<DrawFlat>)
 where
     B: Backend,
 {
-    let color = graph.add_attachment(ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.3, 0.4, 0.5, 1.0])));
-    let depth = graph.add_attachment(DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)));
+    let color = graph.add_attachment(
+        ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.3, 0.4, 0.5, 1.0])),
+    );
+    let depth = graph.add_attachment(
+        DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)),
+    );
 
-    let pass = DrawFlat.build()
-        .with_color(color)
-        .with_depth_stencil(depth);
+    let pass = DrawFlat.build().with_color(color).with_depth_stencil(depth);
 
-    graph
-        .add_pass(pass)
-        .set_present(color);
+    graph.add_pass(pass).set_present(color);
 }
 
 fn fill<B>(scene: &mut Scene<B>, device: &B::Device)
@@ -408,12 +446,14 @@ where
 
     let cube = create_cube(device, &mut scene.allocator);
 
-    scene.objects = vec![Object {
-        mesh: Arc::new(cube),
-        transform: Matrix4::one(),
-        data: (),
-        cache: Vec::new(),
-    }];
+    scene.objects = vec![
+        Object {
+            mesh: Arc::new(cube),
+            transform: Matrix4::one(),
+            data: (),
+            cache: Vec::new(),
+        },
+    ];
 }
 
 fn main() {

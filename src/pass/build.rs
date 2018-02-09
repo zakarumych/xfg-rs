@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use gfx_hal::{Backend, Device, Primitive};
-use gfx_hal::command::{ClearColor, ClearValue, ClearDepthStencil};
+use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::device::Extent;
 use gfx_hal::format::Format;
 use gfx_hal::image;
@@ -10,11 +10,11 @@ use gfx_hal::pso;
 
 use smallvec::SmallVec;
 
-use attachment::{AttachmentRef, AttachmentDesc};
+use attachment::{AttachmentDesc, AttachmentRef};
 use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
 use graph::GraphBuildError;
-use pass::{PassShaders, PassDesc, PassNode};
+use pass::{PassDesc, PassNode, PassShaders};
 
 /// Collection of data required to construct the node in the rendering `Graph` for a single `Pass`
 ///
@@ -107,7 +107,11 @@ where
     ///
     /// - `color`: the color attachment to use
     /// - `blend`: blending description to use
-    pub fn add_color_blend(&mut self, color: AttachmentRef, blend: pso::ColorBlendDesc) -> &mut Self {
+    pub fn add_color_blend(
+        &mut self,
+        color: AttachmentRef,
+        blend: pso::ColorBlendDesc,
+    ) -> &mut Self {
         self.colors.push((color, blend));
         self
     }
@@ -139,7 +143,11 @@ where
     /// ### Parameters:
     ///
     /// - `depth_stencil`: depth stencil attachment to use
-    pub fn with_depth_stencil_desc(mut self, depth_stencil: AttachmentRef, desc: pso::DepthStencilDesc) -> Self {
+    pub fn with_depth_stencil_desc(
+        mut self,
+        depth_stencil: AttachmentRef,
+        desc: pso::DepthStencilDesc,
+    ) -> Self {
         self.depth_stencil = Some((depth_stencil, desc));
         self
     }
@@ -151,7 +159,11 @@ where
     /// ### Parameters:
     ///
     /// - `depth_stencil`: depth stencil attachment to use
-    pub fn set_depth_stencil_desc(&mut self, depth_stencil: AttachmentRef, desc: pso::DepthStencilDesc) -> &mut Self {
+    pub fn set_depth_stencil_desc(
+        &mut self,
+        depth_stencil: AttachmentRef,
+        desc: pso::DepthStencilDesc,
+    ) -> &mut Self {
         self.depth_stencil = Some((depth_stencil, desc));
         self
     }
@@ -209,7 +221,10 @@ where
         assert_eq!(self.sampled.len(), self.pass.sampled());
         assert_eq!(self.inputs.len(), self.pass.inputs());
         assert_eq!(self.colors.len(), self.pass.colors());
-        assert_eq!(self.depth_stencil.is_some(), self.pass.depth() || self.pass.stencil());
+        assert_eq!(
+            self.depth_stencil.is_some(),
+            self.pass.depth() || self.pass.stencil()
+        );
 
         // Construct `RenderPass`
         // with single `Subpass` for now
@@ -315,9 +330,7 @@ where
 
             // Default configuration for blending targets for all color targets
             pipeline_desc.blender.targets =
-                (0 .. self.pass.colors()).map(|i|
-                    self.colors[i].1
-                ).collect();
+                (0..self.pass.colors()).map(|i| self.colors[i].1).collect();
 
             // Default configuration for depth-stencil
             pipeline_desc.depth_stencil = self.depth_stencil.map(|(_, desc)| desc);
@@ -332,7 +345,7 @@ where
                 .create_graphics_pipelines(&[pipeline_desc])
                 .pop()
                 .unwrap()?;
-            
+
             debug!("Graphics pipeline: {:?}", graphics_pipeline);
             graphics_pipeline
         };
@@ -352,27 +365,37 @@ where
         clears.extend(
             self.colors
                 .iter()
-                .map(|c| attachments[c.0.index()].clear.unwrap_or(ignored_color))
+                .map(|c| attachments[c.0.index()].clear.unwrap_or(ignored_color)),
         );
 
         // And depth-stencil
         clears.extend(
             self.depth_stencil
                 .as_ref()
-                .map(|ds| attachments[ds.0.index()].clear.unwrap_or(ignored_depth))
+                .map(|ds| attachments[ds.0.index()].clear.unwrap_or(ignored_depth)),
         );
 
         debug!("Clear values: {:?}", clears);
 
         // create framebuffers
         let framebuffer: SuperFramebuffer<B> = {
-            if self.inputs.len() == 0 && self.colors.len() == 1 && attachments[self.colors[0].0.index()].views == Some(0..0) {
+            if self.inputs.len() == 0 && self.colors.len() == 1
+                && attachments[self.colors[0].0.index()].views == Some(0..0)
+            {
                 SuperFramebuffer::External
             } else {
-                debug!("Create framebuffers from:\ninputs: {:#?}\ncolors: {:#?}\ndepth-stencil: {:#?}", self.inputs, self.colors, self.depth_stencil);
+                debug!(
+                    "Create framebuffers from:\ninputs: {:#?}\ncolors: {:#?}\ndepth-stencil: {:#?}",
+                    self.inputs, self.colors, self.depth_stencil
+                );
                 let mut frames = None;
 
-                for indices in self.inputs.iter().chain(self.colors.iter().map(|&(ref a, _)|a)).chain(self.depth_stencil.as_ref().map(|&(ref a, _)|a)).map(|a| attachments[a.index()].views.clone()) {
+                for indices in self.inputs
+                    .iter()
+                    .chain(self.colors.iter().map(|&(ref a, _)| a))
+                    .chain(self.depth_stencil.as_ref().map(|&(ref a, _)| a))
+                    .map(|a| attachments[a.index()].views.clone())
+                {
                     let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
                     let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
                     assert_eq!(frames.len(), indices.len());
@@ -393,15 +416,24 @@ where
 
                 SuperFramebuffer::Owned(frames
                     .iter()
-                    .map(|targets| device.create_framebuffer(&renderpass, targets.iter().cloned(), extent))
+                    .map(|targets| {
+                        device.create_framebuffer(&renderpass, targets.iter().cloned(), extent)
+                    })
                     .collect::<Result<Vec<_>, _>>()?)
             }
         };
 
         let inputs = {
             let mut frames = None;
-            debug!("Collect inputs:\nsampeld: {:#?}\nattchment: {:#?}", self.sampled, self.inputs);
-            for indices in self.sampled.into_iter().chain(self.inputs).map(|a| attachments[a.0].images.clone()) {
+            debug!(
+                "Collect inputs:\nsampeld: {:#?}\nattchment: {:#?}",
+                self.sampled, self.inputs
+            );
+            for indices in self.sampled
+                .into_iter()
+                .chain(self.inputs)
+                .map(|a| attachments[a.0].images.clone())
+            {
                 let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
                 let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
                 assert_eq!(frames.len(), indices.len());
@@ -455,7 +487,6 @@ fn push_vertex_desc<B>(
         location += 1;
     }
 }
-
 
 fn depth_stencil_desc<P>(pass: &P) -> pso::DepthStencilDesc
 where
