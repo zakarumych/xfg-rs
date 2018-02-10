@@ -8,7 +8,7 @@ repository = "https://github.com/omni-viral/xfg-rs.git"
 cgmath = "0.16"
 env_logger = "0.5"
 genmesh = "0.5.0"
-gfx_mem = { version = "0.1.0", git = "https://github.com/omni-viral/gfx_mem.git", branch = "impl" }
+gfx_mem = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-mem.git" }
 gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }

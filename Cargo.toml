@@ -16,9 +16,9 @@ smallvec = "0.4"
 [dev-dependencies]
 cgmath = "0.16"
 env_logger = "0.5"
-gfx_mem = { version = "0.1.0", git = "https://github.com/omni-viral/gfx_mem.git", branch = "impl" }
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
+gfx_mem = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-mem.git" }
 winit = "0.10"
 
 [workspace]
 members = ["examples"]
+

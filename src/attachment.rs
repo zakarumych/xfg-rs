@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
-use gfx_hal::format::{AspectFlags, Format};
+use gfx_hal::format::Format;
 use gfx_hal::image::ImageLayout;
 use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
 
@@ -38,7 +38,7 @@ impl ColorAttachment {
     ///
     /// If format aspect is not color.
     pub fn new(format: Format) -> Self {
-        assert_eq!(format.aspect_flags(), AspectFlags::COLOR);
+        assert!(format.is_color());
         ColorAttachment(Attachment {
             format,
             clear: None,
@@ -70,7 +70,7 @@ impl DepthStencilAttachment {
     ///
     /// If format aspect doesn't contain depth.
     pub fn new(format: Format) -> Self {
-        assert!(format.aspect_flags().contains(AspectFlags::DEPTH));
+        assert!(format.is_depth());
         DepthStencilAttachment(Attachment {
             format,
             clear: None,
@@ -142,8 +142,7 @@ impl AttachmentDesc {
 
     pub(crate) fn store_op(&self, index: usize) -> AttachmentStoreOp {
         if self.is_last_touch(index) && !self.is_surface {
-            if self.is_last_write(index) && !self.format.aspect_flags().contains(AspectFlags::DEPTH)
-            {
+            if self.is_last_write(index) && !self.format.is_depth() {
                 warn!(
                     "Pass at index {} writes to an attachment and nobody reads it",
                     index

@@ -146,12 +146,16 @@ where
     let surface_format = surface
         .capabilities_and_formats(&adapter.physical_device)
         .1
-        .and_then(|formats| {
+        .map_or(Format::Rgba8Srgb, |formats| {
+            info!("Surface formats: {:#?}", formats);
             formats
-                .into_iter()
-                .find(|format| format.base_format().1 == ChannelType::Srgb)
-        })
-        .unwrap_or(Format::Rgba8Srgb);
+                .iter()
+                .find(|&format| format.base_format().1 == ChannelType::Srgb)
+                .cloned()
+                .unwrap_or(formats[0])
+        });
+
+    info!("Chosen surface format: {:#?}", surface_format);
 
     let memory_properties = adapter.physical_device.memory_properties();
 

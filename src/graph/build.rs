@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
-use gfx_hal::format::{AspectFlags, Format, Swizzle};
+use gfx_hal::format::{Format, Swizzle};
 use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
@@ -560,7 +560,7 @@ where
             kind,
             1,
             format,
-            if format.aspect_flags().contains(AspectFlags::DEPTH) {
+            if format.is_depth() {
                 Usage::DEPTH_STENCIL_ATTACHMENT
             } else {
                 Usage::COLOR_ATTACHMENT
