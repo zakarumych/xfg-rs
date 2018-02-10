@@ -836,17 +836,3 @@ where
         offset
     }
 }
-
-#[test]
-fn shade_pass<B>(inputs: &[AttachmentRef; 4], output: AttachmentRef) -> PassBuilder {
-    PassConstructor
-        // setup sampled attachments at bindings and set
-        .with_many_sampled(0..4, 0, inputs.iter().cloned())
-        // setup color attachment
-        .with_color(output)
-        // create module from bytes and setup entry point
-        .with_vertex_shader(include_bytes!("second.vert.spv"), "main", &[])
-        .with_fragment_shader(include_bytes!("second.frag.spv"), "main", &[])
-        // setup aux type
-        .with_aux::<Scene<B, ObjectData>>()
-}
