@@ -399,8 +399,9 @@ where
                     let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
                     let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
                     assert_eq!(frames.len(), indices.len());
-                    for (i, image) in indices.enumerate() {
-                        frames[i].push(&views[image]);
+
+                    for (frame, index) in frames.iter_mut().zip(indices) {
+                        frame.push(&views[index]);
                     }
                 }
 
@@ -437,8 +438,8 @@ where
                 let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
                 let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
                 assert_eq!(frames.len(), indices.len());
-                for (i, index) in indices.enumerate() {
-                    frames[i].push(images[index].borrow() as *const _);
+                for (frame, index) in frames.iter_mut().zip(indices) {
+                    frame.push(images[index].borrow() as *const _);
                 }
             }
             frames.unwrap_or(vec![])

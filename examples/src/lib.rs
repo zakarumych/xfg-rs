@@ -358,7 +358,7 @@ where
 
     let end = Instant::now();
     let dur = end - start;
-    let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1000000000f64);
+    let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 10e9);
     info!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
     info!("Total frames rendered: {}", total);
     info!("Average FPS: {}", fps);
