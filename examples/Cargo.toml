@@ -1,0 +1,40 @@
+[package]
+name = "xfg-examples"
+version = "0.1.0"
+authors = ["omni-viral <scareaangel@gmail.com>"]
+repository = "https://github.com/omni-viral/xfg-rs.git"
+publish = false
+
+[dependencies]
+cgmath = "0.16"
+env_logger = "0.5"
+genmesh = "0.5.0"
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
+gfx_mem = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-mem.git" }
+log = "0.4"
+smallvec = "0.4"
+winit = "0.10"
+xfg = { path = ".." }
+
+[features]
+dx12 = ["gfx-backend-dx12"]
+gl = ["gfx-backend-gl"]
+metal = ["gfx-backend-metal"]
+vulkan = ["gfx-backend-vulkan"]
+
+[[bin]]
+name = "flat"
+path = "src/flat/main.rs"
+
+[[bin]]
+name = "pbm"
+path = "src/pbm/main.rs"
+
+[[bin]]
+name = "pbm_deferred"
+path = "src/pbm_deferred/main.rs"
