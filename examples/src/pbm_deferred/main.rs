@@ -638,10 +638,7 @@ where
 
 type AnyPass = Box<Pass<back::Backend, Scene<back::Backend, ObjectData>>>;
 
-fn graph<'a, B>(surface_format: Format, graph: &mut GraphBuilder<AnyPass>)
-where
-    B: Backend,
-{
+fn graph<'a>(surface_format: Format, graph: &mut GraphBuilder<AnyPass>) {
     let ambient_roughness = graph.add_attachment(
         ColorAttachment::new(Format::Rgba32Float)
             .with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])),
@@ -742,7 +739,7 @@ where
 }
 
 fn main() {
-    run(graph::<back::Backend>, fill);
+    run(graph, fill);
 }
 
 fn create_sphere<B>(device: &B::Device, factory: &mut SmartAllocator<B>) -> Mesh<B>

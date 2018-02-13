@@ -11,7 +11,7 @@ env_logger = "0.5"
 genmesh = "0.5.0"
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
-gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }

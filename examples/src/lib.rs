@@ -85,7 +85,12 @@ pub struct Scene<B: Backend, T = ()> {
 }
 
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
-pub fn run<T, Y>(_: T, _: Y) {
+pub fn run<G, F, P, T>(_: G, _: F)
+where
+    G: FnOnce(Format, &mut GraphBuilder<P>),
+    P: Pass<back::Backend, Scene<back::Backend, T>>,
+    F: FnOnce(&mut Scene<back::Backend, T>, &<back::Backend as Backend>::Device),
+{
     env_logger::init();
     error!(
         "You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example"

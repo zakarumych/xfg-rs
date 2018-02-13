@@ -21,4 +21,3 @@ winit = "0.10"
 
 [workspace]
 members = ["examples"]
-

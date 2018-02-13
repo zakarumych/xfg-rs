@@ -418,10 +418,7 @@ where
     }
 }
 
-fn graph<B>(surface_format: Format, graph: &mut GraphBuilder<DrawFlat>)
-where
-    B: Backend,
-{
+fn graph(surface_format: Format, graph: &mut GraphBuilder<DrawFlat>) {
     let color = graph.add_attachment(
         ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.3, 0.4, 0.5, 1.0])),
     );
@@ -457,5 +454,5 @@ where
 }
 
 fn main() {
-    run(graph::<back::Backend>, fill);
+    run(graph, fill);
 }

@@ -9,6 +9,7 @@
 
 pub use self::build::{GraphBuildError, GraphBuilder};
 
+use std::borrow::Borrow;
 use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
@@ -97,12 +98,14 @@ where
     ) where
         C: Supports<Graphics> + Supports<Transfer>,
         P: Pass<B, T>,
+        I: Borrow<B::Image>,
     {
         use gfx_hal::queue::submission::Submission;
 
         let ref signals = self.signals;
         let count = self.passes.len();
         let ref draws_to_surface = self.draws_to_surface;
+        let ref images = self.images;
 
         // Record commands for all passes
         self.passes.iter_mut().enumerate().for_each(|(id, pass)| {
@@ -114,8 +117,8 @@ where
             cbuf.set_scissors(&[viewport.rect]);
 
             // Record commands for pass
-            pass.prepare(&mut cbuf, device, frame, aux);
-            pass.draw_inline(&mut cbuf, device, viewport.rect, frame, aux);
+            pass.prepare(&mut cbuf, device, images, frame, aux);
+            pass.draw_inline(&mut cbuf, device, images, viewport.rect, frame, aux);
 
             {
                 // If it renders to acquired image
@@ -187,5 +190,14 @@ where
         for image in self.images {
             deallocator(image, device);
         }
+    }
+}
+
+#[test]
+#[allow(dead_code)]
+fn test_send_sync() {
+    fn is_send_sync<T: Send + Sync>() {}
+    fn test<B: Backend, I: Send + Sync, P: Send + Sync>() {
+        is_send_sync::<Graph<B, I, P>>();
     }
 }
