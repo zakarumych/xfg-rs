@@ -2,20 +2,20 @@
 name = "xfg-examples"
 version = "0.1.0"
 authors = ["omni-viral <scareaangel@gmail.com>"]
-repository = "https://github.com/omni-viral/xfg-rs.git"
+repository = "https://github.com/omni-viral/xfg-rs"
 publish = false
 
 [dependencies]
 cgmath = "0.16"
 env_logger = "0.5"
 genmesh = "0.5.0"
-gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
-gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
-gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
-gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx.git" }
-gfx_mem = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-mem.git" }
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true }
+gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx", optional = true }
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx" }
+gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx", optional = true }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx" }
+gfx_mem = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-mem" }
 log = "0.4"
 smallvec = "0.4"
 winit = "0.10"
