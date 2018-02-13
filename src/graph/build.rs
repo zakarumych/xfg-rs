@@ -382,7 +382,6 @@ impl<P> GraphBuilder<P> {
                 self.extent,
                 &attachments,
                 &image_views,
-                &images,
                 pass_index,
             )?;
 

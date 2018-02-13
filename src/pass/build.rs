@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::device::Extent;
@@ -201,19 +199,17 @@ where
     }
 
     /// Build the `PassNode` that will be added to the rendering `Graph`.
-    pub(crate) fn build<B, E, I>(
+    pub(crate) fn build<B, E>(
         self,
         device: &B::Device,
         extent: Extent,
         attachments: &[AttachmentDesc],
         views: &[B::ImageView],
-        images: &[I],
         index: usize,
     ) -> Result<PassNode<B, P>, GraphBuildError<E>>
     where
         B: Backend,
         P: PassShaders<B>,
-        I: Borrow<B::Image>,
     {
         debug!("Build pass from {:?}", self);
 
@@ -439,7 +435,7 @@ where
                 let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
                 assert_eq!(frames.len(), indices.len());
                 for (frame, index) in frames.iter_mut().zip(indices) {
-                    frame.push(images[index].borrow() as *const _);
+                    frame.push(index);
                 }
             }
             frames.unwrap_or(vec![])
