@@ -26,10 +26,19 @@ pub trait PassDesc: Debug {
     /// Name of the pass
     fn name<'a>(&'a self) -> &'a str;
 
-    /// Sampled attachments count.
+    /// Sampled images count.
+    /// Pass will be able to sample data from those images
+    /// in vertes and/or fragment shader.
     fn sampled(&self) -> usize;
 
+    /// Storage images count.
+    /// Pass will be able to load data from those images
+    /// in vertes and/or fragment shader.
+    fn storage(&self) -> usize;
+
     /// Input attachments count.
+    /// Pass will be able to load data from those images
+    /// in fragment shader but at the fragment’s (x, y, layer) framebuffer coordinates.
     fn inputs(&self) -> usize;
 
     /// Number of colors to write
@@ -66,6 +75,9 @@ where
     }
     fn sampled(&self) -> usize {
         P::sampled(self)
+    }
+    fn storage(&self) -> usize {
+        P::storage(self)
     }
     fn inputs(&self) -> usize {
         P::inputs(self)

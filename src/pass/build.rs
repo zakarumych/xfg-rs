@@ -23,6 +23,7 @@ use pass::{PassDesc, PassNode, PassShaders};
 #[derive(Debug)]
 pub struct PassBuilder<P> {
     pub(crate) sampled: Vec<AttachmentRef>,
+    pub(crate) storages: Vec<AttachmentRef>,
     pub(crate) inputs: Vec<AttachmentRef>,
     pub(crate) colors: Vec<(AttachmentRef, pso::ColorBlendDesc)>,
     pub(crate) depth_stencil: Option<(AttachmentRef, pso::DepthStencilDesc)>,
@@ -39,6 +40,7 @@ where
     pub fn new(pass: P) -> Self {
         PassBuilder {
             sampled: Vec::new(),
+            storages: Vec::new(),
             inputs: Vec::new(),
             colors: Vec::new(),
             depth_stencil: None,
@@ -48,23 +50,43 @@ where
         }
     }
 
-    /// Add the sampled attachment.
+    /// Specify attachment to be sampled in pass.
     ///
     /// ### Parameters:
     ///
-    /// - `input`: the input attachment to use
+    /// - `input`: attachment to use
     pub fn with_sampled(mut self, input: AttachmentRef) -> Self {
         self.sampled.push(input);
         self
     }
 
-    /// Add the sampled attachment.
+    /// Specify attachment to be sampled in pass.
     ///
     /// ### Parameters:
     ///
-    /// - `input`: the input attachment to use
+    /// - `input`: attachment to use
     pub fn add_sampled(&mut self, input: AttachmentRef) -> &mut Self {
         self.sampled.push(input);
+        self
+    }
+
+    /// Specify attachment to be read as storage in pass.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `input`: attachment to use
+    pub fn with_storage(mut self, input: AttachmentRef) -> Self {
+        self.storages.push(input);
+        self
+    }
+
+    /// Specify attachment to be read as storage in pass.
+    ///
+    /// ### Parameters:
+    ///
+    /// - `input`: attachment to use
+    pub fn add_storage(&mut self, input: AttachmentRef) -> &mut Self {
+        self.storages.push(input);
         self
     }
 
@@ -82,7 +104,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `input`: the input attachment to use
+    /// - `input`: attachment to use
     pub fn add_input(&mut self, input: AttachmentRef) -> &mut Self {
         self.inputs.push(input);
         self
@@ -92,7 +114,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `color`: the color attachment to use
+    /// - `color`: attachment to use
     /// - `blend`: blending description to use
     pub fn with_color_blend(mut self, color: AttachmentRef, blend: pso::ColorBlendDesc) -> Self {
         self.colors.push((color, blend));
@@ -103,7 +125,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `color`: the color attachment to use
+    /// - `color`: attachment to use
     /// - `blend`: blending description to use
     pub fn add_color_blend(
         &mut self,
@@ -118,7 +140,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `color`: the color attachment to use
+    /// - `color`: attachment to use
     pub fn with_color(mut self, color: AttachmentRef) -> Self {
         self.colors.push((color, pso::ColorBlendDesc::EMPTY));
         self
@@ -128,7 +150,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `color`: the color attachment to use
+    /// - `color`: attachment to use
     pub fn add_color(&mut self, color: AttachmentRef) -> &mut Self {
         self.colors.push((color, pso::ColorBlendDesc::EMPTY));
         self
@@ -140,7 +162,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `depth_stencil`: depth stencil attachment to use
+    /// - `depth_stencil`: attachment to use
     pub fn with_depth_stencil_desc(
         mut self,
         depth_stencil: AttachmentRef,
@@ -156,7 +178,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `depth_stencil`: depth stencil attachment to use
+    /// - `depth_stencil`: attachment to use
     pub fn set_depth_stencil_desc(
         &mut self,
         depth_stencil: AttachmentRef,
@@ -172,7 +194,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `depth_stencil`: depth stencil attachment to use
+    /// - `depth_stencil`: attachment to use
     pub fn with_depth_stencil(mut self, depth_stencil: AttachmentRef) -> Self {
         self.depth_stencil = Some((depth_stencil, depth_stencil_desc(&self.pass)));
         self
@@ -184,7 +206,7 @@ where
     ///
     /// ### Parameters:
     ///
-    /// - `depth_stencil`: depth stencil attachment to use
+    /// - `depth_stencil`: attachment to use
     pub fn set_depth_stencil(&mut self, depth_stencil: AttachmentRef) -> &mut Self {
         self.depth_stencil = Some((depth_stencil, depth_stencil_desc(&self.pass)));
         self
@@ -423,11 +445,12 @@ where
         let inputs = {
             let mut frames = None;
             debug!(
-                "Collect inputs:\nsampeld: {:#?}\nattchment: {:#?}",
-                self.sampled, self.inputs
+                "Collect inputs:\nsampeld: {:#?}\nstorages: {:#?}\nattchment: {:#?}",
+                self.sampled, self.storages, self.inputs
             );
             for indices in self.sampled
                 .into_iter()
+                .chain(self.storages)
                 .chain(self.inputs)
                 .map(|a| attachments[a.0].images.clone())
             {

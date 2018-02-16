@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::format::Format;
-use gfx_hal::image::ImageLayout;
+use gfx_hal::image::{ImageLayout, Usage as ImageUsage};
 use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
 
 /// Attachment declaration.
@@ -109,6 +109,7 @@ pub(crate) struct AttachmentDesc {
     pub(crate) images: Option<Range<usize>>,
     pub(crate) views: Option<Range<usize>>,
     pub(crate) is_surface: bool,
+    pub(crate) usage: ImageUsage,
 }
 
 impl AttachmentDesc {

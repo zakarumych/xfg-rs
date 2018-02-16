@@ -51,37 +51,34 @@ unsafe impl Pod for PosNormal {}
 #[derive(Debug)]
 struct DrawPbmPrepare;
 impl PassDesc for DrawPbmPrepare {
-    /// Name of the pass
     fn name(&self) -> &str {
         "DrawPbmPrepare"
     }
 
-    /// Sampled attachments
     fn sampled(&self) -> usize {
         0
     }
 
-    /// Input attachments
+    fn storage(&self) -> usize {
+        0
+    }
+
     fn inputs(&self) -> usize {
         0
     }
 
-    /// Color attachments
     fn colors(&self) -> usize {
         4
     }
 
-    /// Uses depth attachment
     fn depth(&self) -> bool {
         true
     }
 
-    /// Uses stencil attachment
     fn stencil(&self) -> bool {
         false
     }
 
-    /// Vertices format
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] {
         &[
             (
@@ -303,37 +300,34 @@ where
 #[derive(Debug)]
 struct DrawPbmShade;
 impl PassDesc for DrawPbmShade {
-    /// Name of the pass
     fn name(&self) -> &str {
         "DrawPbmShade"
     }
 
-    /// Sampled attachments
     fn sampled(&self) -> usize {
+        0
+    }
+
+    fn storage(&self) -> usize {
         4
     }
 
-    /// Input attachments
     fn inputs(&self) -> usize {
         0
     }
 
-    /// Color attachments
     fn colors(&self) -> usize {
         1
     }
 
-    /// Uses depth attachment
     fn depth(&self) -> bool {
         false
     }
 
-    /// Uses stencil attachment
     fn stencil(&self) -> bool {
         false
     }
 
-    /// Vertices format
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] {
         &[]
     }
@@ -672,10 +666,10 @@ fn graph<'a>(surface_format: Format, graph: &mut GraphBuilder<AnyPass>) {
 
     let shade = AnyPass::from(Box::new(DrawPbmShade))
         .build()
-        .with_sampled(ambient_roughness)
-        .with_sampled(emission_metallic)
-        .with_sampled(normal_normal_ambient_occlusion)
-        .with_sampled(position_depth)
+        .with_storage(ambient_roughness)
+        .with_storage(emission_metallic)
+        .with_storage(normal_normal_ambient_occlusion)
+        .with_storage(position_depth)
         .with_color_blend(present, ColorBlendDesc(ColorMask::ALL, BlendState::ADD));
 
     graph.add_pass(prepare).add_pass(shade).set_present(present);

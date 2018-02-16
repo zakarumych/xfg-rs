@@ -91,37 +91,34 @@ fn pad(value: [f32; 3], pad: f32) -> [f32; 4] {
 struct DrawPbm;
 
 impl PassDesc for DrawPbm {
-    /// Name of the pass
     fn name(&self) -> &str {
         "DrawPbm"
     }
 
-    /// Sampled attachment
     fn sampled(&self) -> usize {
         0
     }
 
-    /// Input attachments
+    fn storage(&self) -> usize {
+        0
+    }
+
     fn inputs(&self) -> usize {
         0
     }
 
-    /// Color attachments
     fn colors(&self) -> usize {
         1
     }
 
-    /// Uses depth attachment
     fn depth(&self) -> bool {
         true
     }
 
-    /// Uses stencil attachment
     fn stencil(&self) -> bool {
         false
     }
 
-    /// Vertices format
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] {
         &[
             (

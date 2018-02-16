@@ -6,7 +6,7 @@ use std::ops::Range;
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
 use gfx_hal::format::{Format, Swizzle};
-use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage};
+use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage as ImageUsage};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
@@ -236,7 +236,7 @@ impl<P> GraphBuilder<P> {
     ) -> Result<Graph<B, I, P>, GraphBuildError<E>>
     where
         B: Backend,
-        A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
+        A: FnMut(Kind, Level, Format, ImageUsage, Properties, &B::Device) -> Result<I, E>,
         I: Borrow<B::Image>,
         P: PassShaders<B>,
     {
@@ -279,6 +279,7 @@ impl<P> GraphBuilder<P> {
                 images: None,
                 views: None,
                 is_surface: false,
+                usage: ImageUsage::empty(),
             })
             .collect::<Vec<_>>();
 
@@ -290,56 +291,93 @@ impl<P> GraphBuilder<P> {
         // while keeping all dependencies before dependants.
         let (passes, deps) = reorder_passes(self.passes);
 
+        info!("Reordered passes {:#?}", passes);
+        info!("Dependencies {:#?}", deps);
+
         let mut images = vec![];
 
-        info!("Build pass nodes from pass builders");
+        // Collect usage for attachments.
         let mut pass_nodes: Vec<PassNode<B, P>> = Vec::new();
-
         for (pass_index, pass) in passes.iter().enumerate() {
-            info!("Check sampled inputs");
-            for &sampled in &pass.sampled {
-                let ref mut sampled = attachments[sampled.0];
-                debug_assert!(sampled.write.is_some());
-                debug_assert!(sampled.views.is_some());
-                debug_assert!(sampled.images.is_some());
-                sampled
-                    .read
-                    .get_or_insert_with(|| pass_index..pass_index)
-                    .end = pass_index;
-            }
-
             info!("Check sampled targets");
             for &sampled in &pass.sampled {
                 let ref mut sampled = attachments[sampled.0];
                 debug_assert!(sampled.write.is_some());
-                debug_assert!(sampled.views.is_some());
-                debug_assert!(sampled.images.is_some());
                 sampled
                     .read
                     .get_or_insert_with(|| pass_index..pass_index)
                     .end = pass_index;
+                sampled.usage |= ImageUsage::SAMPLED;
+            }
+
+            info!("Check storage targets");
+            for &storage in &pass.storages {
+                let ref mut storage = attachments[storage.0];
+                debug_assert!(storage.write.is_some());
+                storage
+                    .read
+                    .get_or_insert_with(|| pass_index..pass_index)
+                    .end = pass_index;
+                storage.usage |= ImageUsage::STORAGE;
             }
 
             info!("Check input targets");
             for &input in &pass.inputs {
                 let ref mut input = attachments[input.0];
                 debug_assert!(input.write.is_some());
-                debug_assert!(input.views.is_some());
-                debug_assert!(input.images.is_some());
                 input.read.get_or_insert_with(|| pass_index..pass_index).end = pass_index;
+                // input.usage |= ImageUsage::INPUT_ATTACHMENT;
+                unimplemented!()
             }
 
-            info!("Create color targets");
+            info!("Check color targets");
             for &color in &pass.colors {
                 let ref mut color = attachments[color.0.index()];
                 color
                     .write
                     .get_or_insert_with(|| pass_index..pass_index)
                     .end = pass_index;
+                color.usage |= ImageUsage::COLOR_ATTACHMENT;
+            }
+
+            info!("Check depth-stencil target");
+            if let Some(depth_stencil) = pass.depth_stencil {
+                let ref mut depth_stencil = attachments[depth_stencil.0.index()];
+                depth_stencil
+                    .write
+                    .get_or_insert_with(|| pass_index..pass_index)
+                    .end = pass_index;
+                depth_stencil.usage |= ImageUsage::DEPTH_STENCIL_ATTACHMENT;
+            }
+        }
+
+        for pass in passes.iter() {
+            info!("Ensure sampled targets are created");
+            for &sampled in &pass.sampled {
+                assert!(attachments[sampled.0].views.is_some());
+                assert!(attachments[sampled.0].images.is_some());
+            }
+
+            info!("Ensure storage targets are created");
+            for &storage in &pass.storages {
+                assert!(attachments[storage.0].views.is_some());
+                assert!(attachments[storage.0].images.is_some());
+            }
+
+            info!("Ensure sampled targets are created");
+            for &input in &pass.inputs {
+                assert!(attachments[input.0].views.is_some());
+                assert!(attachments[input.0].images.is_some());
+            }
+
+            info!("Create color targets");
+            for &color in &pass.colors {
+                let ref mut color = attachments[color.0.index()];
                 if color.views.is_none() {
                     debug_assert!(color.images.is_none());
                     create_target::<B, _, I, E>(
                         color.format,
+                        color.usage,
                         &mut allocator,
                         device,
                         &mut images,
@@ -355,14 +393,11 @@ impl<P> GraphBuilder<P> {
             info!("Create depth-stencil target");
             if let Some(depth_stencil) = pass.depth_stencil {
                 let ref mut depth_stencil = attachments[depth_stencil.0.index()];
-                depth_stencil
-                    .write
-                    .get_or_insert_with(|| pass_index..pass_index)
-                    .end = pass_index;
                 if depth_stencil.views.is_none() {
                     debug_assert!(depth_stencil.images.is_none());
                     create_target::<B, _, I, E>(
                         depth_stencil.format,
+                        depth_stencil.usage,
                         &mut allocator,
                         device,
                         &mut images,
@@ -376,6 +411,7 @@ impl<P> GraphBuilder<P> {
             }
         }
 
+        info!("Build pass nodes from pass builders");
         for ((pass_index, pass), last_dep) in passes.into_iter().enumerate().zip(deps) {
             let mut node = pass.build(
                 device,
@@ -479,7 +515,7 @@ fn reorder_passes<P>(
 /// Get dependencies of pass.
 fn direct_dependencies<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usize> {
     let mut deps = Vec::new();
-    for &input in pass.inputs.iter().chain(&pass.sampled) {
+    for &input in pass.sampled.iter().chain(&pass.storages).chain(&pass.inputs) {
         deps.extend(
             passes
                 .iter()
@@ -540,6 +576,7 @@ fn dependencies<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usiz
 
 fn create_target<B, A, I, E>(
     format: Format,
+    usage: ImageUsage,
     mut allocator: A,
     device: &B::Device,
     images: &mut Vec<I>,
@@ -549,21 +586,17 @@ fn create_target<B, A, I, E>(
 ) -> Result<(), E>
 where
     B: Backend,
-    A: FnMut(Kind, Level, Format, Usage, Properties, &B::Device) -> Result<I, E>,
+    A: FnMut(Kind, Level, Format, ImageUsage, Properties, &B::Device) -> Result<I, E>,
     I: Borrow<B::Image>,
 {
-    debug!("Create target with format: {:#?}", format);
+    debug!("Create target with format: {:#?} and usage: {:#?}", format, usage);
     let kind = Kind::D2(extent.width as u16, extent.height as u16, AaMode::Single);
     for _ in 0..frames {
         let image = allocator(
             kind,
             1,
             format,
-            if format.is_depth() {
-                Usage::DEPTH_STENCIL_ATTACHMENT
-            } else {
-                Usage::COLOR_ATTACHMENT
-            } | Usage::STORAGE,
+            usage,
             Properties::DEVICE_LOCAL,
             device,
         )?;
