@@ -1,6 +1,6 @@
 pub extern crate cgmath;
 pub extern crate gfx_hal;
-pub extern crate gfx_mem;
+pub extern crate gfx_memory as mem;
 pub extern crate xfg;
 
 extern crate env_logger;
@@ -21,7 +21,7 @@ use gfx_hal::pool::{CommandPool, CommandPoolCreateFlags};
 use gfx_hal::queue::Graphics;
 use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
 
-use gfx_mem::{Factory, SmartAllocator, Type};
+use mem::{Factory, SmartAllocator, Type};
 
 use winit::{EventsLoop, WindowBuilder};
 
@@ -169,9 +169,9 @@ where
 
     info!(
         "Device features: {:#?}",
-        adapter.physical_device.get_features()
+        adapter.physical_device.features()
     );
-    info!("Device limits: {:#?}", adapter.physical_device.get_limits());
+    info!("Device limits: {:#?}", adapter.physical_device.limits());
 
     let (device, mut queue_group) = adapter
         .open_with::<_, Graphics>(1, |family| surface.supports_queue_family(family))
@@ -370,4 +370,7 @@ where
 
     // TODO: Dispose everything properly.
     ::std::process::exit(0);
+    is_send_sync::<back::Device>();
 }
+
+fn is_send_sync<T: Send + Sync>() {}

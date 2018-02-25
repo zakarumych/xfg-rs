@@ -24,7 +24,7 @@ use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBin
                    DescriptorSetWrite, DescriptorType, DescriptorWrite, ElemStride, Element,
                    EntryPoint, GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet};
 use gfx_hal::queue::Transfer;
-use gfx_mem::{Block, Factory, SmartAllocator};
+use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
 use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
           PassShaders};
@@ -216,12 +216,12 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.update_descriptor_sets(&[
+                device.write_descriptor_sets(&[
                     DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(vec![
+                        write: DescriptorWrite::UniformBuffer(&[
                             (buffer.borrow(), vertex_args_range.clone()),
                         ]),
                     },
@@ -229,7 +229,7 @@ where
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(vec![
+                        write: DescriptorWrite::UniformBuffer(&[
                             (buffer.borrow(), fragment_args_range.clone()),
                         ]),
                     },
@@ -502,12 +502,12 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.update_descriptor_sets(&[
+                device.write_descriptor_sets(&[
                     DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(vec![
+                        write: DescriptorWrite::StorageImage(&[
                             (&views[0], ImageLayout::General),
                         ]),
                     },
@@ -515,7 +515,7 @@ where
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(vec![
+                        write: DescriptorWrite::StorageImage(&[
                             (&views[1], ImageLayout::General),
                         ]),
                     },
@@ -523,7 +523,7 @@ where
                         set: &set,
                         binding: 2,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(vec![
+                        write: DescriptorWrite::StorageImage(&[
                             (&views[2], ImageLayout::General),
                         ]),
                     },
@@ -531,7 +531,7 @@ where
                         set: &set,
                         binding: 3,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(vec![
+                        write: DescriptorWrite::StorageImage(&[
                             (&views[3], ImageLayout::General),
                         ]),
                     },
@@ -539,7 +539,7 @@ where
                         set: &set,
                         binding: 4,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(vec![(buffer.borrow(), 0..size)]),
+                        write: DescriptorWrite::UniformBuffer(&[(buffer.borrow(), 0..size)]),
                     },
                 ]);
                 Cache {

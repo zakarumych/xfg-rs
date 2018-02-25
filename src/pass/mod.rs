@@ -352,7 +352,7 @@ where
 
         let encoder = {
             // Begin render pass with single inline subpass
-            cbuf.begin_renderpass_inline(
+            cbuf.begin_render_pass_inline(
                 &self.renderpass,
                 pick(&self.framebuffer, &frame),
                 rect,
@@ -395,7 +395,7 @@ where
             },
             _ => {}
         }
-        device.destroy_renderpass(self.renderpass);
+        device.destroy_render_pass(self.renderpass);
         device.destroy_graphics_pipeline(self.graphics_pipeline);
         device.destroy_pipeline_layout(self.pipeline_layout);
     }

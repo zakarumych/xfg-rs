@@ -23,7 +23,7 @@ use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorTyp
                    DescriptorWrite, ElemStride, Element, EntryPoint, GraphicsShaderSet,
                    ShaderStageFlags, VertexBufferSet};
 use gfx_hal::queue::Transfer;
-use gfx_mem::{Block, Factory, SmartAllocator};
+use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
 use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
           PassShaders};
@@ -253,12 +253,12 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.update_descriptor_sets(&[
+                device.write_descriptor_sets(&[
                     DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(vec![
+                        write: DescriptorWrite::UniformBuffer(&[
                             (buffer.borrow(), vertex_args_range.clone()),
                         ]),
                     },
@@ -266,7 +266,7 @@ where
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(vec![
+                        write: DescriptorWrite::UniformBuffer(&[
                             (buffer.borrow(), fragment_args_range.clone()),
                         ]),
                     },
