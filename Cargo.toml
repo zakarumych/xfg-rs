@@ -16,7 +16,7 @@ smallvec = "0.4"
 [dev-dependencies]
 cgmath = "0.16"
 env_logger = "0.5"
-gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "ccf1cad" }
+gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "b828fdb" }
 winit = "0.10"
 
 [workspace]
