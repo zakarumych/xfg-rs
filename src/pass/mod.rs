@@ -302,9 +302,14 @@ where
         P: Pass<B, T>,
         I: Borrow<B::Image>,
     {
-        let inputs = self.inputs.get(frame.index()).map_or(SmallVec::new(), |inputs| {
-            inputs.iter().map(|&index| images[index].borrow()).collect::<SmallVec<[_; 16]>>()
-        });
+        let inputs = self.inputs
+            .get(frame.index())
+            .map_or(SmallVec::new(), |inputs| {
+                inputs
+                    .iter()
+                    .map(|&index| images[index].borrow())
+                    .collect::<SmallVec<[_; 16]>>()
+            });
 
         // Run custom preparation
         // * Write descriptor sets
@@ -360,9 +365,14 @@ where
             )
         };
 
-        let inputs = self.inputs.get(frame.index()).map_or(SmallVec::new(), |inputs| {
-            inputs.iter().map(|&index| images[index].borrow()).collect::<SmallVec<[_; 16]>>()
-        });
+        let inputs = self.inputs
+            .get(frame.index())
+            .map_or(SmallVec::new(), |inputs| {
+                inputs
+                    .iter()
+                    .map(|&index| images[index].borrow())
+                    .collect::<SmallVec<[_; 16]>>()
+            });
 
         // Record custom drawing calls
         self.pass.draw_inline(

@@ -167,10 +167,7 @@ where
     let mut allocator =
         SmartAllocator::<back::Backend>::new(memory_properties, 32, 32, 32, 1024 * 1024 * 64);
 
-    info!(
-        "Device features: {:#?}",
-        adapter.physical_device.features()
-    );
+    info!("Device features: {:#?}", adapter.physical_device.features());
     info!("Device limits: {:#?}", adapter.physical_device.limits());
 
     let (device, mut queue_group) = adapter

@@ -8,7 +8,7 @@ repository = "https://github.com/omni-viral/xfg-rs"
 
 [dependencies]
 derivative = "1.0"
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "68e80eaf" }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "070e0cee4" }
 log = "0.4"
 relevant = "0.1"
 smallvec = "0.4"
@@ -16,7 +16,7 @@ smallvec = "0.4"
 [dev-dependencies]
 cgmath = "0.16"
 env_logger = "0.5"
-gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "4aa2d27" }
+gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "ec605bd3d" }
 winit = "0.10"
 
 [workspace]

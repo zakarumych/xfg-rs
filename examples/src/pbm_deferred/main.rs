@@ -17,9 +17,9 @@ use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
                        RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
-use gfx_hal::format::{AspectFlags, Format, Swizzle};
+use gfx_hal::format::{Aspects, Format, Swizzle};
 use gfx_hal::image::{Access, ImageLayout, SubresourceRange};
-use gfx_hal::memory::{cast_slice, Barrier, Pod};
+use gfx_hal::memory::{cast_slice, Barrier, Dependencies, Pod};
 use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding,
                    DescriptorSetWrite, DescriptorType, DescriptorWrite, ElemStride, Element,
                    EntryPoint, GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet};
@@ -449,7 +449,7 @@ where
             };
 
             let color_range = SubresourceRange {
-                aspects: AspectFlags::COLOR,
+                aspects: Aspects::COLOR,
                 levels: 0..1,
                 layers: 0..1,
             };
@@ -507,33 +507,25 @@ where
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[
-                            (&views[0], ImageLayout::General),
-                        ]),
+                        write: DescriptorWrite::StorageImage(&[(&views[0], ImageLayout::General)]),
                     },
                     DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[
-                            (&views[1], ImageLayout::General),
-                        ]),
+                        write: DescriptorWrite::StorageImage(&[(&views[1], ImageLayout::General)]),
                     },
                     DescriptorSetWrite {
                         set: &set,
                         binding: 2,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[
-                            (&views[2], ImageLayout::General),
-                        ]),
+                        write: DescriptorWrite::StorageImage(&[(&views[2], ImageLayout::General)]),
                     },
                     DescriptorSetWrite {
                         set: &set,
                         binding: 3,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[
-                            (&views[3], ImageLayout::General),
-                        ]),
+                        write: DescriptorWrite::StorageImage(&[(&views[3], ImageLayout::General)]),
                     },
                     DescriptorSetWrite {
                         set: &set,
@@ -553,6 +545,7 @@ where
                 ..(Access::SHADER_READ, ImageLayout::General);
             cbuf.pipeline_barrier(
                 PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::FRAGMENT_SHADER,
+                Dependencies::empty(),
                 &[
                     Barrier::Image {
                         states: states.clone(),
@@ -801,8 +794,10 @@ where
         )
         .unwrap();
     {
+        let start = buffer.range().start;
+        let end = start + indices.len() as u64;
         let mut writer = device
-            .acquire_mapping_writer(buffer.memory(), buffer.range())
+            .acquire_mapping_writer(buffer.memory(), start..end)
             .unwrap();
         writer.copy_from_slice(indices);
         device.release_mapping_writer(writer);

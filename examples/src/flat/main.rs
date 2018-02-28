@@ -399,8 +399,10 @@ where
         )
         .unwrap();
     {
+        let start = buffer.range().start;
+        let end = start + indices.len() as u64;
         let mut writer = device
-            .acquire_mapping_writer(buffer.memory(), buffer.range())
+            .acquire_mapping_writer(buffer.memory(), start..end)
             .unwrap();
         writer.copy_from_slice(indices);
         device.release_mapping_writer(writer);

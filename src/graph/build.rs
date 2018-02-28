@@ -256,7 +256,7 @@ impl<P> GraphBuilder<P> {
                             self.attachments[present.0].format,
                             Swizzle::NO,
                             SubresourceRange {
-                                aspects: self.attachments[present.0].format.aspect_flags(),
+                                aspects: self.attachments[present.0].format.aspects(),
                                 layers: 0..1,
                                 levels: 0..1,
                             },
@@ -413,13 +413,7 @@ impl<P> GraphBuilder<P> {
 
         info!("Build pass nodes from pass builders");
         for ((pass_index, pass), last_dep) in passes.into_iter().enumerate().zip(deps) {
-            let mut node = pass.build(
-                device,
-                self.extent,
-                &attachments,
-                &image_views,
-                pass_index,
-            )?;
+            let mut node = pass.build(device, self.extent, &attachments, &image_views, pass_index)?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -515,7 +509,11 @@ fn reorder_passes<P>(
 /// Get dependencies of pass.
 fn direct_dependencies<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usize> {
     let mut deps = Vec::new();
-    for &input in pass.sampled.iter().chain(&pass.storages).chain(&pass.inputs) {
+    for &input in pass.sampled
+        .iter()
+        .chain(&pass.storages)
+        .chain(&pass.inputs)
+    {
         deps.extend(
             passes
                 .iter()
@@ -589,24 +587,20 @@ where
     A: FnMut(Kind, Level, Format, ImageUsage, Properties, &B::Device) -> Result<I, E>,
     I: Borrow<B::Image>,
 {
-    debug!("Create target with format: {:#?} and usage: {:#?}", format, usage);
+    debug!(
+        "Create target with format: {:#?} and usage: {:#?}",
+        format, usage
+    );
     let kind = Kind::D2(extent.width as u16, extent.height as u16, AaMode::Single);
     for _ in 0..frames {
-        let image = allocator(
-            kind,
-            1,
-            format,
-            usage,
-            Properties::DEVICE_LOCAL,
-            device,
-        )?;
+        let image = allocator(kind, 1, format, usage, Properties::DEVICE_LOCAL, device)?;
         let view = device
             .create_image_view(
                 image.borrow(),
                 format,
                 Swizzle::NO,
                 SubresourceRange {
-                    aspects: format.aspect_flags(),
+                    aspects: format.aspects(),
                     layers: 0..1,
                     levels: 0..1,
                 },
