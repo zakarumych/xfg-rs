@@ -44,7 +44,6 @@ pub struct Graph<B: Backend, I, P> {
     images: Vec<I>,
     views: Vec<B::ImageView>,
     frames: usize,
-    draws_to_surface: Range<usize>,
 }
 
 impl<B, I, P> Graph<B, I, P>
@@ -104,7 +103,6 @@ where
 
         let ref signals = self.signals;
         let count = self.passes.len();
-        let ref draws_to_surface = self.draws_to_surface;
         let ref images = self.images;
 
         // Record commands for all passes
@@ -117,33 +115,10 @@ where
             cbuf.set_scissors(&[viewport.rect]);
 
             // Record commands for pass
-            pass.prepare(&mut cbuf, device, images, frame, aux);
-            pass.draw_inline(&mut cbuf, device, images, viewport.rect, frame, aux);
+            pass.prepare(&mut cbuf, device, frame, aux);
+            pass.draw_inline(&mut cbuf, device, viewport.rect, frame, aux);
 
             {
-                // If it renders to acquired image
-                let wait_surface = if id == draws_to_surface.start {
-                    // And it should wait for acquisition
-                    Some((acquire, PipelineStage::TOP_OF_PIPE))
-                } else {
-                    None
-                };
-
-                let to_wait = pass.depends
-                    .as_ref()
-                    .map(|&(id, stage)| (signals[id].as_ref().unwrap(), stage))
-                    .into_iter()
-                    .chain(wait_surface)
-                    .collect::<SmallVec<[_; 3]>>();
-
-                let mut to_signal = SmallVec::<[_; 1]>::new();
-                if id == draws_to_surface.end {
-                    to_signal.push(release);
-                }
-                if let Some(signal) = signals[id].as_ref() {
-                    to_signal.push(signal);
-                }
-
                 // Signal the finish fence in last submission
                 let fence = if id == count - 1 { Some(finish) } else { None };
 
@@ -151,9 +126,7 @@ where
                 queue.submit(
                     Submission::new()
                         .promote::<C>()
-                        .submit(Some(cbuf.finish()))
-                        .wait_on(&to_wait)
-                        .signal(&to_signal),
+                        .submit(Some(cbuf.finish())),
                     fence,
                 );
             }

@@ -1,18 +1,25 @@
+use std::collections::hash_map::{Entry, HashMap};
+use std::iter::FromIterator;
+use std::ops::Range;
+
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::device::Extent;
-use gfx_hal::format::Format;
+use gfx_hal::format::{Aspects, Format};
 use gfx_hal::image;
 use gfx_hal::pass;
 use gfx_hal::pso;
 
 use smallvec::SmallVec;
 
-use attachment::{AttachmentDesc, AttachmentRef};
+use attachment::{AttachmentDesc, AttachmentImages, AttachmentRef};
 use descriptors::DescriptorPool;
 use frame::SuperFramebuffer;
 use graph::GraphBuildError;
 use pass::{PassDesc, PassNode, PassShaders};
+use utils::common_image_layout;
+
+use chain::*;
 
 /// Collection of data required to construct the node in the rendering `Graph` for a single `Pass`
 ///
@@ -220,18 +227,119 @@ where
         self.pass.name()
     }
 
+    /// Collect links of the pass.
+    /// Chains is built upon them.
+    /// This method is invoked with passes already reordered.
+    pub(crate) fn links<'a, F>(&self, index: usize, desc: F) -> PassLinks
+    where
+        F: Fn(AttachmentRef) -> &'a AttachmentDesc,
+    {
+        let mut attachments: HashMap<AttachmentRef, ImageLink> = HashMap::new();
+
+        let put = |entry: Entry<AttachmentRef, ImageLink>, usage, layout, stage, access| match entry
+        {
+            Entry::Occupied(occupied) => {
+                let ref mut dep = *occupied.into_mut();
+                dep.stages |= stage;
+                dep.state.usage |= usage;
+                dep.state.layout = common_image_layout(layout, dep.state.layout);
+                dep.state.access |= access;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(Link {
+                    id: ChainId::new(vacant.key().index()),
+                    stages: stage,
+                    state: ImageState {
+                        layout,
+                        usage,
+                        access,
+                    },
+                });
+            }
+        };
+
+        for &a in &self.sampled {
+            assert!(desc(a).is_read(index));
+            put(
+                attachments.entry(a),
+                image::Usage::SAMPLED,
+                image::ImageLayout::ShaderReadOnlyOptimal,
+                pso::PipelineStage::FRAGMENT_SHADER,
+                image::Access::SHADER_READ,
+            );
+        }
+        for &a in &self.storages {
+            assert!(desc(a).is_read(index));
+            put(
+                attachments.entry(a),
+                image::Usage::STORAGE,
+                image::ImageLayout::General,
+                pso::PipelineStage::FRAGMENT_SHADER,
+                image::Access::SHADER_READ,
+            );
+        }
+        for &a in &self.inputs {
+            assert!(desc(a).is_read(index));
+            put(
+                attachments.entry(a),
+                image::Usage::INPUT_ATTACHMENT,
+                image::ImageLayout::ShaderReadOnlyOptimal,
+                pso::PipelineStage::FRAGMENT_SHADER,
+                image::Access::INPUT_ATTACHMENT_READ,
+            );
+        }
+        for &(a, _) in &self.colors {
+            assert!(desc(a).is_write(index));
+            let access = if desc(a).is_read(index) {
+                image::Access::COLOR_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_WRITE
+            } else {
+                image::Access::COLOR_ATTACHMENT_WRITE
+            };
+            put(
+                attachments.entry(a),
+                image::Usage::COLOR_ATTACHMENT,
+                image::ImageLayout::ColorAttachmentOptimal,
+                pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                access,
+            );
+        }
+        for &(a, _) in &self.depth_stencil {
+            assert!(desc(a).is_write(index));
+            let access = if desc(a).is_read(index) {
+                image::Access::COLOR_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_WRITE
+            } else {
+                image::Access::COLOR_ATTACHMENT_WRITE
+            };
+            put(
+                attachments.entry(a),
+                image::Usage::DEPTH_STENCIL_ATTACHMENT,
+                image::ImageLayout::DepthStencilAttachmentOptimal,
+                pso::PipelineStage::EARLY_FRAGMENT_TESTS | pso::PipelineStage::LATE_FRAGMENT_TESTS,
+                access,
+            );
+        }
+
+        PassLinks {
+            images: attachments.into_iter().map(|(_, l)| l).collect(),
+            buffers: Vec::new(),
+        }
+    }
+
     /// Build the `PassNode` that will be added to the rendering `Graph`.
-    pub(crate) fn build<B, E>(
-        self,
+    pub(crate) fn build<'a, B, E, V, I>(
+        &self,
+        index: usize,
         device: &B::Device,
         extent: Extent,
-        attachments: &[AttachmentDesc],
-        views: &[B::ImageView],
-        index: usize,
+        chains: &GraphChains,
+        views: V,
+        images: I,
     ) -> Result<PassNode<B, P>, GraphBuildError<E>>
     where
         B: Backend,
         P: PassShaders<B>,
+        V: Fn(AttachmentRef) -> &'a [B::ImageView],
+        I: Fn(AttachmentRef) -> &'a [B::Image],
     {
         debug!("Build pass from {:?}", self);
 
@@ -248,69 +356,76 @@ where
         // with single `Subpass` for now
         let renderpass = {
             // Configure input attachments first
-            let inputs = self.inputs.iter().map(|input| {
-                let ref input = attachments[input.0];
+            let inputs = self.inputs.iter().map(|&a| {
+                let ref link = chains[a];
                 let attachment = pass::Attachment {
-                    format: Some(input.format),
+                    format: None,
                     ops: pass::AttachmentOps {
-                        load: input.load_op(index),
-                        store: input.store_op(index),
+                        load: link.load_op(index),
+                        store: link.store_op(index),
                     },
                     stencil_ops: pass::AttachmentOps::DONT_CARE,
-                    layouts: input.image_layout_transition(index),
+                    layouts: link.pass_layout_transition(index),
                 };
                 debug!("Init input attachment: {:?}", attachment);
                 attachment
             });
 
             // Configure color attachments next to input
-            let colors = self.colors.iter().map(|color| {
-                let ref color = attachments[color.0.index()];
+            let colors = self.colors.iter().map(|&(color, _)| {
+                let ref link = chains[color];
                 let attachment = pass::Attachment {
-                    format: Some(color.format),
+                    format: None,
                     ops: pass::AttachmentOps {
-                        load: color.load_op(index),
-                        store: color.store_op(index),
+                        load: link.load_op(index),
+                        store: link.store_op(index),
                     },
                     stencil_ops: pass::AttachmentOps::DONT_CARE,
-                    layouts: color.image_layout_transition(index),
+                    layouts: link.pass_layout_transition(index),
                 };
                 debug!("Init color attachment: {:?}", attachment);
                 attachment
             });
 
             // Configure depth-stencil attachments last
-            let depth_stencil = self.depth_stencil.map(|depth_stencil| {
-                let ref depth_stencil = attachments[depth_stencil.0.index()];
+            let depth_stencil = self.depth_stencil.as_ref().map(|&(depth_stencil, _)| {
+                let ref link = chains[depth_stencil];
                 let attachment = pass::Attachment {
-                    format: Some(depth_stencil.format),
+                    format: None,
                     ops: pass::AttachmentOps {
-                        load: depth_stencil.load_op(index),
-                        store: depth_stencil.store_op(index),
+                        load: link.load_op(index),
+                        store: link.store_op(index),
                     },
                     stencil_ops: pass::AttachmentOps::DONT_CARE,
-                    layouts: depth_stencil.image_layout_transition(index),
+                    layouts: link.pass_layout_transition(index),
                 };
                 debug!("Init depth attachment {:?}", attachment);
                 attachment
             });
 
-            let depth_stencil_ref = depth_stencil.as_ref().map(|_| {
-                (
-                    inputs.len() + colors.len(),
-                    image::ImageLayout::DepthStencilAttachmentOptimal,
-                )
-            });
-
             // Configure the only `Subpass` using all attachments
             let subpass = pass::SubpassDesc {
-                colors: &(0..colors.len())
-                    .map(|i| (i + inputs.len(), image::ImageLayout::ColorAttachmentOptimal))
+                inputs: &self.inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &input)| (i, chains[input].subpass_layout(index)))
                     .collect::<Vec<_>>(),
-                depth_stencil: depth_stencil_ref.as_ref(),
-                inputs: &(0..inputs.len())
-                    .map(|i| (i, image::ImageLayout::ShaderReadOnlyOptimal))
+                colors: &self.colors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &(color, _))| {
+                        (i + self.inputs.len(), chains[color].subpass_layout(index))
+                    })
                     .collect::<Vec<_>>(),
+                depth_stencil: self.depth_stencil
+                    .as_ref()
+                    .map(|&(depth_stencil, _)| {
+                        (
+                            self.inputs.len() + self.colors.len(),
+                            chains[depth_stencil].subpass_layout(index),
+                        )
+                    })
+                    .as_ref(),
                 preserves: &[],
             };
 
@@ -373,7 +488,8 @@ where
         }
 
         // This color will be set to targets that aren't get cleared
-        let ignored_color = ClearValue::Color(ClearColor::Float([0.1, 0.2, 0.3, 1.0]));
+        // ignored value is pink
+        let ignored_color = ClearValue::Color(ClearColor::Float([1.0, 0.0, 0.5, 1.0]));
         let ignored_depth = ClearValue::DepthStencil(ClearDepthStencil(1.0, 0));
 
         // But we need `ClearValue` for each target
@@ -383,14 +499,14 @@ where
         clears.extend(
             self.colors
                 .iter()
-                .map(|c| attachments[c.0.index()].clear.unwrap_or(ignored_color)),
+                .map(|&(c, _)| chains[c].clear_value(index).unwrap_or(ignored_color)),
         );
 
         // And depth-stencil
         clears.extend(
             self.depth_stencil
                 .as_ref()
-                .map(|ds| attachments[ds.0.index()].clear.unwrap_or(ignored_depth)),
+                .map(|&(ds, _)| chains[ds].clear_value(index).unwrap_or(ignored_depth)),
         );
 
         debug!("Clear values: {:?}", clears);
@@ -398,7 +514,7 @@ where
         // create framebuffers
         let framebuffer: SuperFramebuffer<B> = {
             if self.inputs.len() == 0 && self.colors.len() == 1
-                && attachments[self.colors[0].0.index()].views == Some(0..0)
+                && views(self.colors[0].0).is_empty()
             {
                 SuperFramebuffer::External
             } else {
@@ -408,18 +524,17 @@ where
                 );
                 let mut frames = None;
 
-                for indices in self.inputs
+                for views in self.inputs
                     .iter()
                     .chain(self.colors.iter().map(|&(ref a, _)| a))
                     .chain(self.depth_stencil.as_ref().map(|&(ref a, _)| a))
-                    .map(|a| attachments[a.index()].views.clone())
+                    .map(|&a| views(a))
                 {
-                    let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
-                    let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
-                    assert_eq!(frames.len(), indices.len());
+                    let frames = frames.get_or_insert_with(|| vec![vec![]; views.len()]);
+                    assert_eq!(frames.len(), views.len());
 
-                    for (frame, index) in frames.iter_mut().zip(indices) {
-                        frame.push(&views[index]);
+                    for (frame, view) in frames.iter_mut().zip(views) {
+                        frame.push(view);
                     }
                 }
 
@@ -448,17 +563,16 @@ where
                 "Collect inputs:\nsampeld: {:#?}\nstorages: {:#?}\nattchment: {:#?}",
                 self.sampled, self.storages, self.inputs
             );
-            for indices in self.sampled
-                .into_iter()
-                .chain(self.storages)
-                .chain(self.inputs)
-                .map(|a| attachments[a.0].images.clone())
+            for images in self.sampled
+                .iter()
+                .chain(&self.storages)
+                .chain(&self.inputs)
+                .map(|&a| images(a))
             {
-                let indices = indices.ok_or(GraphBuildError::InvalidConfiguaration)?;
-                let frames = frames.get_or_insert_with(|| vec![vec![]; indices.len()]);
-                assert_eq!(frames.len(), indices.len());
-                for (frame, index) in frames.iter_mut().zip(indices) {
-                    frame.push(index);
+                let frames = frames.get_or_insert_with(|| vec![vec![]; images.len()]);
+                assert_eq!(frames.len(), images.len());
+                for (frame, image) in frames.iter_mut().zip(images) {
+                    frame.push(image as *const _);
                 }
             }
             frames.unwrap_or(vec![])

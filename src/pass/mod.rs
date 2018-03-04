@@ -4,6 +4,7 @@ pub use self::build::PassBuilder;
 
 use std::borrow::Borrow;
 use std::fmt::Debug;
+use std::mem::transmute;
 use std::ops::{Deref, DerefMut};
 
 use gfx_hal::{Backend, Device};
@@ -268,7 +269,7 @@ pub(crate) struct PassNode<B: Backend, P> {
     renderpass: B::RenderPass,
     framebuffer: SuperFramebuffer<B>,
     pass: P,
-    inputs: Vec<Vec<usize>>,
+    inputs: Vec<Vec<*const B::Image>>,
     pub(crate) depends: Option<(usize, PipelineStage)>,
 }
 
@@ -290,26 +291,17 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn prepare<C, T, I>(
+    pub fn prepare<C, T>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
         device: &B::Device,
-        images: &[I],
         frame: SuperFrame<B>,
         aux: &mut T,
     ) where
         C: Supports<Transfer>,
         P: Pass<B, T>,
-        I: Borrow<B::Image>,
     {
-        let inputs = self.inputs
-            .get(frame.index())
-            .map_or(SmallVec::new(), |inputs| {
-                inputs
-                    .iter()
-                    .map(|&index| images[index].borrow())
-                    .collect::<SmallVec<[_; 16]>>()
-            });
+        let inputs: &[_] = unsafe { transmute(&self.inputs[..]) };
 
         // Run custom preparation
         // * Write descriptor sets
@@ -339,18 +331,16 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn draw_inline<C, T, I>(
+    pub fn draw_inline<C, T>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
         device: &B::Device,
-        images: &[I],
         rect: Rect,
         frame: SuperFrame<B>,
         aux: &T,
     ) where
         C: Supports<Graphics>,
         P: Pass<B, T>,
-        I: Borrow<B::Image>,
     {
         // Bind pipeline
         cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
@@ -365,14 +355,7 @@ where
             )
         };
 
-        let inputs = self.inputs
-            .get(frame.index())
-            .map_or(SmallVec::new(), |inputs| {
-                inputs
-                    .iter()
-                    .map(|&index| images[index].borrow())
-                    .collect::<SmallVec<[_; 16]>>()
-            });
+        let inputs: &[_] = unsafe { transmute(&self.inputs[..]) };
 
         // Record custom drawing calls
         self.pass.draw_inline(

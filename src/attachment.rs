@@ -8,11 +8,13 @@ use gfx_hal::format::Format;
 use gfx_hal::image::{ImageLayout, Usage as ImageUsage};
 use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
 
+use chain::{ImageChain, ImageChainId, ImageInit};
+
 /// Attachment declaration.
 #[derive(Clone, Copy, Debug)]
 pub struct Attachment {
     pub(crate) format: Format,
-    pub(crate) clear: Option<ClearValue>,
+    pub(crate) init: ImageInit,
 }
 
 impl From<ColorAttachment> for Attachment {
@@ -41,7 +43,7 @@ impl ColorAttachment {
         assert!(format.is_color());
         ColorAttachment(Attachment {
             format,
-            clear: None,
+            init: ImageInit::DontCare,
         })
     }
 
@@ -55,7 +57,18 @@ impl ColorAttachment {
     /// Set clearing color for the attachment.
     /// First pass that use the attachment as output will clear it.
     pub fn set_clear(&mut self, clear: ClearColor) {
-        self.0.clear = Some(ClearValue::Color(clear));
+        self.0.init = ImageInit::Clear(ClearValue::Color(clear));
+    }
+
+    /// Set attachment to be loaded instead of cleared.
+    pub fn load(mut self) -> Self {
+        self.set_load();
+        self
+    }
+
+    /// Set attachment to be loaded instead of cleared.
+    pub fn set_load(&mut self) {
+        self.0.init = ImageInit::Load;
     }
 }
 
@@ -73,7 +86,7 @@ impl DepthStencilAttachment {
         assert!(format.is_depth());
         DepthStencilAttachment(Attachment {
             format,
-            clear: None,
+            init: ImageInit::DontCare,
         })
     }
 
@@ -87,85 +100,48 @@ impl DepthStencilAttachment {
     /// Set clearing values for the attachment.
     /// First pass that use the attachment as output will clear it.
     pub fn set_clear(&mut self, clear: ClearDepthStencil) {
-        self.0.clear = Some(ClearValue::DepthStencil(clear));
+        self.0.init = ImageInit::Clear(ClearValue::DepthStencil(clear));
+    }
+
+    /// Set attachment to be loaded instead of cleared.
+    pub fn load(mut self) -> Self {
+        self.set_load();
+        self
+    }
+
+    /// Set attachment to be loaded instead of cleared.
+    pub fn set_load(&mut self) {
+        self.0.init = ImageInit::Load;
     }
 }
 
-/// Reference to either color or depth-stencil attachment declaration in `GraphBuilder`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AttachmentRef(pub(crate) usize);
-impl AttachmentRef {
-    pub(crate) fn index(&self) -> usize {
-        self.0
-    }
+#[derive(Debug)]
+pub(crate) struct AttachmentImages {
+    pub(crate) images: Range<usize>,
+    pub(crate) views: Range<usize>,
 }
 
 #[derive(Debug)]
 pub(crate) struct AttachmentDesc {
     pub(crate) format: Format,
-    pub(crate) clear: Option<ClearValue>,
-    pub(crate) write: Option<Range<usize>>,
-    pub(crate) read: Option<Range<usize>>,
-    pub(crate) images: Option<Range<usize>>,
-    pub(crate) views: Option<Range<usize>>,
-    pub(crate) is_surface: bool,
-    pub(crate) usage: ImageUsage,
+    pub(crate) init: ImageInit,
+    pub(crate) writes: Option<(usize, usize)>,
+    pub(crate) reads: Option<(usize, usize)>,
 }
 
 impl AttachmentDesc {
-    fn is_first_write(&self, index: usize) -> bool {
-        self.write.clone().map_or(false, |w| w.start == index)
+    pub(crate) fn is_read(&self, index: usize) -> bool {
+        self.writes
+            .map_or(false, |(first, _)| first == index && !self.init.discard())
+            || self.writes
+                .map_or(false, |(first, last)| first < index && last >= index)
+            || self.reads
+                .map_or(false, |(first, last)| first <= index && last >= index)
     }
-    fn is_last_write(&self, index: usize) -> bool {
-        self.write.clone().map_or(false, |w| w.end == index)
-    }
-    fn is_last_read(&self, index: usize) -> bool {
-        self.read.clone().map_or(false, |r| r.end == index)
-    }
-    fn is_first_touch(&self, index: usize) -> bool {
-        self.is_first_write(index)
-    }
-    fn is_last_touch(&self, index: usize) -> bool {
-        self.is_last_read(index) || (self.is_last_write(index) && self.read.is_none())
-    }
-
-    pub(crate) fn load_op(&self, index: usize) -> AttachmentLoadOp {
-        if self.is_first_touch(index) {
-            if self.clear.is_some() {
-                AttachmentLoadOp::Clear
-            } else {
-                AttachmentLoadOp::DontCare
-            }
-        } else {
-            AttachmentLoadOp::Load
-        }
-    }
-
-    pub(crate) fn store_op(&self, index: usize) -> AttachmentStoreOp {
-        if self.is_last_touch(index) && !self.is_surface {
-            if self.is_last_write(index) && !self.format.is_depth() {
-                warn!(
-                    "Pass at index {} writes to an attachment and nobody reads it",
-                    index
-                );
-            }
-            AttachmentStoreOp::DontCare
-        } else {
-            AttachmentStoreOp::Store
-        }
-    }
-
-    pub(crate) fn image_layout_transition(&self, index: usize) -> Range<ImageLayout> {
-        let start = if self.is_first_touch(index) {
-            ImageLayout::Undefined
-        } else {
-            ImageLayout::General
-        };
-        let end = if self.is_last_touch(index) && self.is_surface {
-            ImageLayout::Present
-        } else {
-            ImageLayout::General
-        };
-        start..end
+    pub(crate) fn is_write(&self, index: usize) -> bool {
+        self.writes
+            .map_or(false, |(first, last)| first <= index && last >= index)
     }
 }
+
+pub type AttachmentRef = ImageChainId;

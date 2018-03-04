@@ -1,19 +1,21 @@
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::ops::Range;
+use std::ops::{Range, RangeFrom};
 
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
 use gfx_hal::format::{Format, Swizzle};
-use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage as ImageUsage};
+use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage as ImageUsage, ImageLayout, Access as ImageAccess};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
 
-use attachment::{Attachment, AttachmentDesc, AttachmentRef};
+use attachment::{Attachment, AttachmentDesc, AttachmentRef, AttachmentImages};
 use graph::Graph;
 use pass::{PassBuilder, PassNode, PassShaders};
+use chain::{ChainId, GraphChains, ImageChain, BufferChain, PassLinks, ImageLink, ImageState};
 
 /// Possible errors during graph building
 #[derive(Debug, Clone)]
@@ -29,7 +31,7 @@ pub enum GraphBuildError<E> {
     /// Allocation errors as returned by the `allocator` function given to `GraphBuilder::build`
     AllocationError(E),
     /// Graph configuration is invalid.
-    InvalidConfiguaration,
+    InvalidConfiguration,
     /// Any other errors encountered during graph building
     Other,
 }
@@ -72,9 +74,7 @@ where
                 fmt.write_str("Presentation attachment wasn't set in GraphBuilder")
             }
             GraphBuildError::AllocationError(ref error) => write!(fmt, "{}", error),
-            GraphBuildError::InvalidConfiguaration => {
-                write!(fmt, "Graph has invalid configuration")
-            }
+            GraphBuildError::InvalidConfiguration => write!(fmt, "Graph has invalid configuration"),
             GraphBuildError::Other => fmt.write_str("Unknown error has occured"),
         }
     }
@@ -104,17 +104,19 @@ where
 /// - `T`: auxiliary data used by the `Pass`es in the `Graph`
 #[derive(Debug)]
 pub struct GraphBuilder<P> {
-    attachments: Vec<Attachment>,
+    attachments: HashMap<AttachmentRef, Attachment>,
     passes: Vec<PassBuilder<P>>,
     present: Option<AttachmentRef>,
     extent: Extent,
+    chain_id_image: RangeFrom<usize>,
+    chain_id_buffer: RangeFrom<usize>,
 }
 
 impl<P> GraphBuilder<P> {
     /// Create a new `GraphBuilder`
     pub fn new() -> Self {
         GraphBuilder {
-            attachments: Vec::new(),
+            attachments: HashMap::new(),
             passes: Vec::new(),
             present: None,
             extent: Extent {
@@ -122,10 +124,12 @@ impl<P> GraphBuilder<P> {
                 height: 0,
                 depth: 0,
             },
+            chain_id_image: 0 ..,
+            chain_id_buffer: 0 ..,
         }
     }
 
-    /// Add an `Attachment` to the `Graph` and return a value to reference added attachment.
+    /// Add an `Attachment` to the `Graph` and return `AttachmentRef` of added attachment.
     ///
     /// ### Parameters:
     ///
@@ -135,11 +139,10 @@ impl<P> GraphBuilder<P> {
     where
         A: Into<Attachment>,
     {
-        self.attachments.push(attachment.into());
-        AttachmentRef(self.attachments.len() - 1)
+        self.add_attachments(Some(attachment)).start
     }
 
-    /// Add a few `Attachment`s to the `Graph` and return an iterator of references to added attachment.
+    /// Add a few `Attachment`s to the `Graph` and return an iterator over `AttachmentRef` of added attachment.
     ///
     /// ### Parameters:
     ///
@@ -150,10 +153,10 @@ impl<P> GraphBuilder<P> {
         I: IntoIterator<Item = A>,
         A: Into<Attachment>,
     {
-        let start = self.attachments.len();
+        let start = self.chain_id_image.start;
         self.attachments
-            .extend(attachments.into_iter().map(Into::into));
-        AttachmentRef(start)..AttachmentRef(self.attachments.len())
+            .extend(self.chain_id_image.by_ref().map(AttachmentRef::new).zip(attachments.into_iter().map(Into::into)));
+        AttachmentRef::new(start) .. AttachmentRef::new(self.chain_id_image.start)
     }
 
     /// Add a `Pass` to the `Graph`
@@ -240,6 +243,8 @@ impl<P> GraphBuilder<P> {
         I: Borrow<B::Image>,
         P: PassShaders<B>,
     {
+        self.passes = reorder_passes(self.passes);
+
         info!("Building graph from {:?}", self);
         let present = self.present
             .ok_or(GraphBuildError::PresentationAttachmentNotSet)?;
@@ -253,10 +258,10 @@ impl<P> GraphBuilder<P> {
                     .map(|image| {
                         device.create_image_view(
                             image,
-                            self.attachments[present.0].format,
+                            self.attachments[&present].format,
                             Swizzle::NO,
                             SubresourceRange {
-                                aspects: self.attachments[present.0].format.aspects(),
+                                aspects: self.attachments[&present].format.aspects(),
                                 layers: 0..1,
                                 levels: 0..1,
                             },
@@ -269,213 +274,128 @@ impl<P> GraphBuilder<P> {
             Backbuffer::Framebuffer(_) => (vec![], 1),
         };
 
-        let mut attachments = self.attachments
+        let mut descs = self.attachments
             .into_iter()
-            .map(|a| AttachmentDesc {
-                format: a.format,
-                clear: a.clear,
-                write: None,
-                read: None,
-                images: None,
-                views: None,
-                is_surface: false,
-                usage: ImageUsage::empty(),
-            })
-            .collect::<Vec<_>>();
+            .map(|(k, v)| (k, AttachmentDesc {
+                format: v.format,
+                init: v.init,
+                writes: None,
+                reads: None,
+            }))
+            .collect::<HashMap<_, _>>();
 
-        attachments[present.0].views = Some(0..image_views.len());
-        attachments[present.0].is_surface = true;
-
-        info!("Reorder passes to maximize overlapping");
-        // Reorder passes to maximise overlapping
-        // while keeping all dependencies before dependants.
-        let (passes, deps) = reorder_passes(self.passes);
-
-        info!("Reordered passes {:#?}", passes);
-        info!("Dependencies {:#?}", deps);
-
-        let mut images = vec![];
-
-        // Collect usage for attachments.
-        let mut pass_nodes: Vec<PassNode<B, P>> = Vec::new();
-        for (pass_index, pass) in passes.iter().enumerate() {
+        for (pass_index, pass) in self.passes.iter().enumerate() {
             info!("Check sampled targets");
-            for &sampled in &pass.sampled {
-                let ref mut sampled = attachments[sampled.0];
-                debug_assert!(sampled.write.is_some());
+            for sampled in &pass.sampled {
+                let ref mut sampled = descs[sampled];
+                debug_assert!(sampled.writes.is_some());
                 sampled
-                    .read
-                    .get_or_insert_with(|| pass_index..pass_index)
-                    .end = pass_index;
-                sampled.usage |= ImageUsage::SAMPLED;
+                    .reads
+                    .get_or_insert_with(|| (pass_index, pass_index))
+                    .1 = pass_index;
             }
 
             info!("Check storage targets");
-            for &storage in &pass.storages {
-                let ref mut storage = attachments[storage.0];
-                debug_assert!(storage.write.is_some());
+            for storage in &pass.storages {
+                let ref mut storage = descs[storage];
+                debug_assert!(storage.writes.is_some());
                 storage
-                    .read
-                    .get_or_insert_with(|| pass_index..pass_index)
-                    .end = pass_index;
-                storage.usage |= ImageUsage::STORAGE;
+                    .reads
+                    .get_or_insert_with(|| (pass_index, pass_index))
+                    .1 = pass_index;
             }
 
             info!("Check input targets");
-            for &input in &pass.inputs {
-                let ref mut input = attachments[input.0];
-                debug_assert!(input.write.is_some());
-                input.read.get_or_insert_with(|| pass_index..pass_index).end = pass_index;
-                // input.usage |= ImageUsage::INPUT_ATTACHMENT;
+            for input in &pass.inputs {
+                let ref mut input = descs[input];
+                debug_assert!(input.writes.is_some());
+                input.reads.get_or_insert_with(|| (pass_index, pass_index)).1 = pass_index;
                 unimplemented!()
             }
 
             info!("Check color targets");
-            for &color in &pass.colors {
-                let ref mut color = attachments[color.0.index()];
+            for &(ref color, _) in &pass.colors {
+                let ref mut color = descs[color];
                 color
-                    .write
-                    .get_or_insert_with(|| pass_index..pass_index)
-                    .end = pass_index;
-                color.usage |= ImageUsage::COLOR_ATTACHMENT;
+                    .writes
+                    .get_or_insert_with(|| (pass_index, pass_index))
+                    .1 = pass_index;
             }
 
             info!("Check depth-stencil target");
-            if let Some(depth_stencil) = pass.depth_stencil {
-                let ref mut depth_stencil = attachments[depth_stencil.0.index()];
+            if let Some((ref depth_stencil, _)) = pass.depth_stencil {
+                let ref mut depth_stencil = descs[depth_stencil];
                 depth_stencil
-                    .write
-                    .get_or_insert_with(|| pass_index..pass_index)
-                    .end = pass_index;
-                depth_stencil.usage |= ImageUsage::DEPTH_STENCIL_ATTACHMENT;
+                    .writes
+                    .get_or_insert_with(|| (pass_index, pass_index))
+                    .1 = pass_index;
             }
         }
 
-        for pass in passes.iter() {
-            info!("Ensure sampled targets are created");
-            for &sampled in &pass.sampled {
-                assert!(attachments[sampled.0].views.is_some());
-                assert!(attachments[sampled.0].images.is_some());
-            }
+        let mut links: Vec<PassLinks> = self.passes.iter().enumerate().map(|(pass_index, pass)| pass.links(pass_index, |a| &descs[&a])).collect();
 
-            info!("Ensure storage targets are created");
-            for &storage in &pass.storages {
-                assert!(attachments[storage.0].views.is_some());
-                assert!(attachments[storage.0].images.is_some());
-            }
-
-            info!("Ensure sampled targets are created");
-            for &input in &pass.inputs {
-                assert!(attachments[input.0].views.is_some());
-                assert!(attachments[input.0].images.is_some());
-            }
-
-            info!("Create color targets");
-            for &color in &pass.colors {
-                let ref mut color = attachments[color.0.index()];
-                if color.views.is_none() {
-                    debug_assert!(color.images.is_none());
-                    create_target::<B, _, I, E>(
-                        color.format,
-                        color.usage,
-                        &mut allocator,
-                        device,
-                        &mut images,
-                        &mut image_views,
-                        self.extent,
-                        frames,
-                    ).map_err(GraphBuildError::AllocationError)?;
-                    color.views = Some((image_views.len() - frames..image_views.len()));
-                    color.images = Some((images.len() - frames..images.len()));
+        // Add `Presentation` as fake pass.
+        links.push(PassLinks {
+            buffers: Vec::new(),
+            images: vec![
+                ImageLink {
+                    id: present,
+                    stages: PipelineStage::empty(),
+                    state: ImageState {
+                        usage: ImageUsage::empty(),
+                        access: ImageAccess::empty(),
+                        layout: ImageLayout::Present,
+                    }
                 }
-            }
+            ],
+        });
 
-            info!("Create depth-stencil target");
-            if let Some(depth_stencil) = pass.depth_stencil {
-                let ref mut depth_stencil = attachments[depth_stencil.0.index()];
-                if depth_stencil.views.is_none() {
-                    debug_assert!(depth_stencil.images.is_none());
-                    create_target::<B, _, I, E>(
-                        depth_stencil.format,
-                        depth_stencil.usage,
-                        &mut allocator,
-                        device,
-                        &mut images,
-                        &mut image_views,
-                        self.extent,
-                        frames,
-                    ).map_err(GraphBuildError::AllocationError)?;
-                    depth_stencil.views = Some((image_views.len() - frames..image_views.len()));
-                    depth_stencil.images = Some((images.len() - frames..images.len()));
-                }
-            }
+        let mut chains = GraphChains::new(self.chain_id_buffer.start, self.chain_id_image.start, &links);
+        for (&attachment, desc) in &descs {
+            chains[attachment].init = desc.init;
         }
 
+        let mut images = Vec::new();
+
+        let attachment_images = descs.iter().map(|(&attachment, desc)| {
+            let (images, views) = create_target::<B, _, I, E>(
+                desc.format,
+                chains[attachment].usage,
+                &mut allocator,
+                device,
+                &mut images,
+                &mut image_views,
+                self.extent,
+                frames,
+            ).map_err(GraphBuildError::AllocationError)?;
+            Ok((attachment, AttachmentImages {
+                images,
+                views
+            }))
+        }).collect::<Result<HashMap<_, _>, _>>()?;
+
+        let mut passes = Vec::new();
         info!("Build pass nodes from pass builders");
-        for ((pass_index, pass), last_dep) in passes.into_iter().enumerate().zip(deps) {
-            let mut node = pass.build(device, self.extent, &attachments, &image_views, pass_index)?;
-
-            if let Some(last_dep) = last_dep {
-                node.depends = if pass_nodes
-                    .iter()
-                    .find(|node| {
-                        node.depends
-                            .as_ref()
-                            .map(|&(id, _)| id == last_dep)
-                            .unwrap_or(false)
-                    })
-                    .is_none()
-                {
-                    // No passes prior this depends on `last_dep`
-                    Some((last_dep, PipelineStage::TOP_OF_PIPE)) // Pick better stage.
-                } else {
-                    None
-                };
-            }
-
-            pass_nodes.push(node);
-        }
-
-        info!("Create semaphores");
-        let mut signals = Vec::new();
-        for i in 0..pass_nodes.len() {
-            if let Some(j) = pass_nodes.iter().position(|node| {
-                node.depends
-                    .as_ref()
-                    .map(|&(id, _)| id == i)
-                    .unwrap_or(false)
-            }) {
-                // j depends on i
-                assert!(
-                    pass_nodes
-                        .iter()
-                        .skip(j + 1)
-                        .find(|node| node.depends
-                            .as_ref()
-                            .map(|&(id, _)| id == i)
-                            .unwrap_or(false))
-                        .is_none()
-                );
-                signals.push(Some(device.create_semaphore()));
-            } else {
-                signals.push(None);
-            }
+        for (pass_index, pass) in self.passes.iter().enumerate() {
+            let views = |a| &image_views[attachment_images[&a].views];
+            let images = |a| &images[attachment_images[&a].images];
+            let mut node = pass.build(pass_index, device, self.extent, &chains, views, images)?;
+            passes.push(node);
         }
 
         Ok(Graph {
-            passes: pass_nodes,
-            signals,
+            passes,
+            signals: vec![],
             images,
             views: image_views,
             frames,
-            draws_to_surface: attachments[present.0].write.clone().unwrap(),
         })
     }
 }
 
 fn reorder_passes<P>(
     mut unscheduled: Vec<PassBuilder<P>>,
-) -> (Vec<PassBuilder<P>>, Vec<Option<usize>>) {
+) -> Vec<PassBuilder<P>> {
     // Ordered passes
     let mut scheduled = vec![];
     let mut deps = vec![];
@@ -483,7 +403,7 @@ fn reorder_passes<P>(
     // Until we schedule all unscheduled passes
     while !unscheduled.is_empty() {
         // Walk over unscheduled
-        let (last_dep, index) = (0..unscheduled.len())
+        let (_, index) = (0..unscheduled.len())
             .filter(|&index| {
                 // Check if all dependencies are scheduled
                 dependencies(&unscheduled, &unscheduled[index]).is_empty()
@@ -501,9 +421,8 @@ fn reorder_passes<P>(
 
         // Store
         scheduled.push(unscheduled.swap_remove(index));
-        deps.push(last_dep);
     }
-    (scheduled, deps)
+    scheduled
 }
 
 /// Get dependencies of pass.
@@ -581,7 +500,7 @@ fn create_target<B, A, I, E>(
     views: &mut Vec<B::ImageView>,
     extent: Extent,
     frames: usize,
-) -> Result<(), E>
+) -> Result<(Range<usize>, Range<usize>), E>
 where
     B: Backend,
     A: FnMut(Kind, Level, Format, ImageUsage, Properties, &B::Device) -> Result<I, E>,
@@ -591,6 +510,8 @@ where
         "Create target with format: {:#?} and usage: {:#?}",
         format, usage
     );
+    let istart = images.len();
+    let vstart = views.len();
     let kind = Kind::D2(extent.width as u16, extent.height as u16, AaMode::Single);
     for _ in 0..frames {
         let image = allocator(kind, 1, format, usage, Properties::DEVICE_LOCAL, device)?;
@@ -609,5 +530,5 @@ where
         views.push(view);
         images.push(image);
     }
-    Ok(())
+    Ok((istart .. images.len(), vstart .. views.len()))
 }
