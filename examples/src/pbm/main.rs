@@ -7,8 +7,8 @@ extern crate xfg_examples;
 use xfg_examples::*;
 
 use std::borrow::Borrow;
-use std::ops::{Add, BitOr, Sub};
 use std::iter::once;
+use std::ops::{Add, BitOr, Sub};
 use std::sync::Arc;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, Transform};
@@ -20,9 +20,9 @@ use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::memory::{cast_slice, Pod};
-use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
-                   Descriptor, ElemStride, Element, EntryPoint, GraphicsShaderSet,
-                   ShaderStageFlags, VertexBufferSet};
+use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
+                   ElemStride, Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags,
+                   VertexBufferSet};
 use gfx_hal::queue::Transfer;
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
@@ -259,14 +259,19 @@ where
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), vertex_args_range.clone())),
-                    })
-                    .chain(once(DescriptorSetWrite {
+                        descriptors: Some(Descriptor::Buffer(
+                            buffer.borrow(),
+                            vertex_args_range.clone(),
+                        )),
+                    }).chain(once(DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), fragment_args_range.clone())),
-                    }))
+                        descriptors: Some(Descriptor::Buffer(
+                            buffer.borrow(),
+                            fragment_args_range.clone(),
+                        )),
+                    })),
                 );
                 Cache {
                     uniforms: vec![buffer],

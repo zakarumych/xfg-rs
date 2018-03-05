@@ -7,8 +7,8 @@ extern crate xfg_examples;
 use xfg_examples::*;
 
 use std::borrow::Borrow;
-use std::ops::{Add, BitOr, Sub};
 use std::iter::once;
+use std::ops::{Add, BitOr, Sub};
 use std::sync::Arc;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, Transform};
@@ -21,9 +21,9 @@ use gfx_hal::device::ShaderError;
 use gfx_hal::format::{Aspects, Format, Swizzle};
 use gfx_hal::image::{Access, ImageLayout, SubresourceRange};
 use gfx_hal::memory::{cast_slice, Barrier, Dependencies, Pod};
-use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding,
-                   DescriptorSetWrite, DescriptorType, Descriptor, ElemStride, Element,
-                   EntryPoint, GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet};
+use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, Descriptor, DescriptorSetLayoutBinding,
+                   DescriptorSetWrite, DescriptorType, ElemStride, Element, EntryPoint,
+                   GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet};
 use gfx_hal::queue::Transfer;
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
@@ -217,21 +217,25 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.write_descriptor_sets(once(
-                    DescriptorSetWrite {
+                device.write_descriptor_sets(
+                    once(DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), vertex_args_range.clone())),
-                    }
-                ).chain(once(
-                    DescriptorSetWrite {
+                        descriptors: Some(Descriptor::Buffer(
+                            buffer.borrow(),
+                            vertex_args_range.clone(),
+                        )),
+                    }).chain(once(DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), fragment_args_range.clone())),
-                    }
-                )));
+                        descriptors: Some(Descriptor::Buffer(
+                            buffer.borrow(),
+                            fragment_args_range.clone(),
+                        )),
+                    })),
+                );
                 Cache {
                     uniforms: vec![buffer],
                     views: vec![],
@@ -500,42 +504,40 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.write_descriptor_sets(once(
-                    DescriptorSetWrite {
+                device.write_descriptor_sets(
+                    once(DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
                         descriptors: Some(Descriptor::Image(&views[0], ImageLayout::General)),
-                    }
-                ).chain(once(
-                    DescriptorSetWrite {
+                    }).chain(once(DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
                         descriptors: Some(Descriptor::Image(&views[1], ImageLayout::General)),
-                    }
-                )).chain(once(
-                    DescriptorSetWrite {
-                        set: &set,
-                        binding: 2,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Image(&views[2], ImageLayout::General)),
-                    }
-                )).chain(once(
-                    DescriptorSetWrite {
-                        set: &set,
-                        binding: 3,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Image(&views[3], ImageLayout::General)),
-                    }
-                )).chain(once(
-                    DescriptorSetWrite {
-                        set: &set,
-                        binding: 4,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), Some(0)..Some(size))),
-                    }
-                )));
+                    }))
+                        .chain(once(DescriptorSetWrite {
+                            set: &set,
+                            binding: 2,
+                            array_offset: 0,
+                            descriptors: Some(Descriptor::Image(&views[2], ImageLayout::General)),
+                        }))
+                        .chain(once(DescriptorSetWrite {
+                            set: &set,
+                            binding: 3,
+                            array_offset: 0,
+                            descriptors: Some(Descriptor::Image(&views[3], ImageLayout::General)),
+                        }))
+                        .chain(once(DescriptorSetWrite {
+                            set: &set,
+                            binding: 4,
+                            array_offset: 0,
+                            descriptors: Some(Descriptor::Buffer(
+                                buffer.borrow(),
+                                Some(0)..Some(size),
+                            )),
+                        })),
+                );
                 Cache {
                     uniforms: vec![buffer],
                     views,

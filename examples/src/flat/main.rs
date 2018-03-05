@@ -18,9 +18,9 @@ use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::memory::{cast_slice, Pod};
-use gfx_hal::pso::{DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
-                   Descriptor, ElemStride, Element, EntryPoint, GraphicsShaderSet,
-                   ShaderStageFlags, VertexBufferSet};
+use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
+                   ElemStride, Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags,
+                   VertexBufferSet};
 use gfx_hal::queue::Transfer;
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
@@ -168,14 +168,12 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.write_descriptor_sets(Some(
-                    DescriptorSetWrite {
-                        set: &set,
-                        binding: 0,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), Some(0)..Some(size))),
-                    },
-                ));
+                device.write_descriptor_sets(Some(DescriptorSetWrite {
+                    set: &set,
+                    binding: 0,
+                    array_offset: 0,
+                    descriptors: Some(Descriptor::Buffer(buffer.borrow(), Some(0)..Some(size))),
+                }));
                 Cache {
                     uniforms: vec![buffer],
                     views: Vec::new(),
@@ -425,10 +423,7 @@ fn graph(surface_format: Format, graph: &mut GraphBuilder<DrawFlat>) {
         DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)),
     );
 
-    let pass = DrawFlat.build()
-        .with_color(color)
-        .with_depth_stencil(depth)
-        ;
+    let pass = DrawFlat.build().with_color(color).with_depth_stencil(depth);
 
     graph.add_pass(pass).set_present(color);
 }
