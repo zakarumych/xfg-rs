@@ -8,6 +8,7 @@ use xfg_examples::*;
 
 use std::borrow::Borrow;
 use std::ops::{Add, BitOr, Sub};
+use std::iter::once;
 use std::sync::Arc;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, Transform};
@@ -21,7 +22,7 @@ use gfx_hal::format::{Aspects, Format, Swizzle};
 use gfx_hal::image::{Access, ImageLayout, SubresourceRange};
 use gfx_hal::memory::{cast_slice, Barrier, Dependencies, Pod};
 use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, DescriptorSetLayoutBinding,
-                   DescriptorSetWrite, DescriptorType, DescriptorWrite, ElemStride, Element,
+                   DescriptorSetWrite, DescriptorType, Descriptor, ElemStride, Element,
                    EntryPoint, GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet};
 use gfx_hal::queue::Transfer;
 use mem::{Block, Factory, SmartAllocator};
@@ -199,10 +200,10 @@ where
                 ambient_occlusion: obj.data.ambient_occlusion,
             };
 
-            let vertex_args_range = 0..::std::mem::size_of::<VertexArgs>() as u64;
-            let fragment_args_offset = shift_for_alignment(256, vertex_args_range.end);
-            let fragment_args_range = fragment_args_offset
-                ..fragment_args_offset + ::std::mem::size_of::<FragmentArgs>() as u64;
+            let vertex_args_range = Some(0)..Some(::std::mem::size_of::<VertexArgs>() as u64);
+            let fragment_args_offset = shift_for_alignment(256, vertex_args_range.end.unwrap());
+            let fragment_args_range = Some(fragment_args_offset)
+                ..Some(fragment_args_offset + ::std::mem::size_of::<FragmentArgs>() as u64);
 
             let grow = (obj.cache.len()..frame + 1).map(|_| None);
             obj.cache.extend(grow);
@@ -211,29 +212,26 @@ where
                     .create_buffer(
                         device,
                         REQUEST_DEVICE_LOCAL,
-                        fragment_args_range.end,
+                        fragment_args_range.end.unwrap(),
                         Usage::UNIFORM | Usage::TRANSFER_DST,
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.write_descriptor_sets(&[
+                device.write_descriptor_sets(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(&[
-                            (buffer.borrow(), vertex_args_range.clone()),
-                        ]),
-                    },
+                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), vertex_args_range.clone())),
+                    }
+                ).chain(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(&[
-                            (buffer.borrow(), fragment_args_range.clone()),
-                        ]),
-                    },
-                ]);
+                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), fragment_args_range.clone())),
+                    }
+                )));
                 Cache {
                     uniforms: vec![buffer],
                     views: vec![],
@@ -242,12 +240,12 @@ where
             });
             cbuf.update_buffer(
                 cache.uniforms[0].borrow(),
-                vertex_args_range.start,
+                vertex_args_range.start.unwrap(),
                 cast_slice(&[vertex_args]),
             );
             cbuf.update_buffer(
                 cache.uniforms[0].borrow(),
-                fragment_args_range.start,
+                fragment_args_range.start.unwrap(),
                 cast_slice(&[fragment_args]),
             );
         }
@@ -502,38 +500,42 @@ where
                     )
                     .unwrap();
                 let set = pool.allocate(device);
-                device.write_descriptor_sets(&[
+                device.write_descriptor_sets(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[(&views[0], ImageLayout::General)]),
-                    },
+                        descriptors: Some(Descriptor::Image(&views[0], ImageLayout::General)),
+                    }
+                ).chain(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[(&views[1], ImageLayout::General)]),
-                    },
+                        descriptors: Some(Descriptor::Image(&views[1], ImageLayout::General)),
+                    }
+                )).chain(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 2,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[(&views[2], ImageLayout::General)]),
-                    },
+                        descriptors: Some(Descriptor::Image(&views[2], ImageLayout::General)),
+                    }
+                )).chain(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 3,
                         array_offset: 0,
-                        write: DescriptorWrite::StorageImage(&[(&views[3], ImageLayout::General)]),
-                    },
+                        descriptors: Some(Descriptor::Image(&views[3], ImageLayout::General)),
+                    }
+                )).chain(once(
                     DescriptorSetWrite {
                         set: &set,
                         binding: 4,
                         array_offset: 0,
-                        write: DescriptorWrite::UniformBuffer(&[(buffer.borrow(), 0..size)]),
-                    },
-                ]);
+                        descriptors: Some(Descriptor::Buffer(buffer.borrow(), Some(0)..Some(size))),
+                    }
+                )));
                 Cache {
                     uniforms: vec![buffer],
                     views,

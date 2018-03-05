@@ -97,41 +97,29 @@ where
 }
 
 fn bindings_to_range_desc(bindings: &[DescriptorSetLayoutBinding]) -> Vec<DescriptorRangeDesc> {
-    let mut descs: Vec<DescriptorRangeDesc> = vec![
-        DescriptorRangeDesc {
-            ty: DescriptorType::Sampler,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::SampledImage,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::StorageImage,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::UniformTexelBuffer,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::StorageTexelBuffer,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::UniformBuffer,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::StorageBuffer,
-            count: 0,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::InputAttachment,
-            count: 0,
-        },
-    ];
+    let cast = |i: usize| {
+        match i {
+            x if x == DescriptorType::Sampler as usize => DescriptorType::Sampler,
+            x if x == DescriptorType::CombinedImageSampler as usize => DescriptorType::CombinedImageSampler,
+            x if x == DescriptorType::SampledImage as usize => DescriptorType::SampledImage,
+            x if x == DescriptorType::StorageImage as usize => DescriptorType::StorageImage,
+            x if x == DescriptorType::UniformTexelBuffer as usize => DescriptorType::UniformTexelBuffer,
+            x if x == DescriptorType::StorageTexelBuffer as usize => DescriptorType::StorageTexelBuffer,
+            x if x == DescriptorType::UniformBuffer as usize => DescriptorType::UniformBuffer,
+            x if x == DescriptorType::StorageBuffer as usize => DescriptorType::StorageBuffer,
+            x if x == DescriptorType::UniformBufferDynamic as usize => DescriptorType::UniformBufferDynamic,
+            x if x == DescriptorType::UniformImageDynamic as usize => DescriptorType::UniformImageDynamic,
+            x if x == DescriptorType::InputAttachment as usize => DescriptorType::InputAttachment,
+            _ => unreachable!(),
+        }
+    };
+
+    let mut descs: Vec<DescriptorRangeDesc> = vec![];
     for binding in bindings {
+        let len = descs.len();
+        descs.extend((len .. (binding.ty as usize) + 1).map(|ty| {
+            DescriptorRangeDesc { ty: cast(ty), count: 0 } 
+        }));
         let ref mut desc = descs[binding.ty as usize];
         debug_assert_eq!(desc.ty, binding.ty);
         desc.count += binding.count * CAPACITY;
