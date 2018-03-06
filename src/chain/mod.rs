@@ -2,9 +2,9 @@ use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Range};
 
-use gfx_hal::buffer::{Access as BufferAccess, Usage as BufferUsage, State as BufferState};
+use gfx_hal::buffer::{Access as BufferAccess, State as BufferState, Usage as BufferUsage};
 use gfx_hal::command::ClearValue;
-use gfx_hal::image::{Access as ImageAccess, ImageLayout, Usage as ImageUsage, State as ImageState};
+use gfx_hal::image::{Access as ImageAccess, ImageLayout, State as ImageState, Usage as ImageUsage};
 use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
 use gfx_hal::pso::PipelineStage;
 use gfx_hal::queue::QueueFamilyId;
@@ -91,13 +91,8 @@ pub struct PassLinks<S> {
 #[derive(Clone, Debug)]
 enum LinkTransition<S> {
     None,
-    Barrier {
-        states: Range<S>
-    },
-    Ownership {
-        states: Range<S>,
-        semaphore: usize,
-    },
+    Barrier { states: Range<S> },
+    Ownership { states: Range<S>, semaphore: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -135,11 +130,8 @@ impl<S, U, I> Chain<S, U, I> {
         for pass in iter {
             // Get links of the pass
             if let Some(link) = pass.borrow().links.iter().find(|l| l.id == id) {
-                
                 // Find last access
-                for prev in links.iter().rev().filter_map(|l| l.map(|l| l.release )) {
-                    
-                }
+                for prev in links.iter().rev().filter_map(|l| l.map(|l| l.release)) {}
 
                 let link = ChainLink {
                     queue: pass.borrow().queue,

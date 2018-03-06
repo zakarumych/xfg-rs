@@ -7,15 +7,16 @@ use std::ops::{Range, RangeFrom};
 use gfx_hal::{Backend, Device};
 use gfx_hal::device::{Extent, FramebufferError, ShaderError};
 use gfx_hal::format::{Format, Swizzle};
-use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage as ImageUsage, ImageLayout, Access as ImageAccess};
+use gfx_hal::image::{AaMode, Access as ImageAccess, ImageLayout, Kind, Level, SubresourceRange,
+                     Usage as ImageUsage};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
 
-use attachment::{Attachment, AttachmentDesc, AttachmentRef, AttachmentImages};
+use attachment::{Attachment, AttachmentDesc, AttachmentImages, AttachmentRef};
+use chain::{BufferChain, ChainId, GraphChains, ImageChain, ImageLink, ImageState, PassLinks};
 use graph::Graph;
 use pass::{PassBuilder, PassNode, PassShaders};
-use chain::{ChainId, GraphChains, ImageChain, BufferChain, PassLinks, ImageLink, ImageState};
 
 /// Possible errors during graph building
 #[derive(Debug, Clone)]
@@ -124,8 +125,8 @@ impl<P> GraphBuilder<P> {
                 height: 0,
                 depth: 0,
             },
-            chain_id_image: 0 ..,
-            chain_id_buffer: 0 ..,
+            chain_id_image: 0..,
+            chain_id_buffer: 0..,
         }
     }
 
@@ -154,9 +155,13 @@ impl<P> GraphBuilder<P> {
         A: Into<Attachment>,
     {
         let start = self.chain_id_image.start;
-        self.attachments
-            .extend(self.chain_id_image.by_ref().map(AttachmentRef::new).zip(attachments.into_iter().map(Into::into)));
-        AttachmentRef::new(start) .. AttachmentRef::new(self.chain_id_image.start)
+        self.attachments.extend(
+            self.chain_id_image
+                .by_ref()
+                .map(AttachmentRef::new)
+                .zip(attachments.into_iter().map(Into::into)),
+        );
+        AttachmentRef::new(start)..AttachmentRef::new(self.chain_id_image.start)
     }
 
     /// Add a `Pass` to the `Graph`
@@ -276,12 +281,17 @@ impl<P> GraphBuilder<P> {
 
         let mut descs = self.attachments
             .into_iter()
-            .map(|(k, v)| (k, AttachmentDesc {
-                format: v.format,
-                init: v.init,
-                writes: None,
-                reads: None,
-            }))
+            .map(|(k, v)| {
+                (
+                    k,
+                    AttachmentDesc {
+                        format: v.format,
+                        init: v.init,
+                        writes: None,
+                        reads: None,
+                    },
+                )
+            })
             .collect::<HashMap<_, _>>();
 
         for (pass_index, pass) in self.passes.iter().enumerate() {
@@ -309,7 +319,10 @@ impl<P> GraphBuilder<P> {
             for input in &pass.inputs {
                 let ref mut input = descs[input];
                 debug_assert!(input.writes.is_some());
-                input.reads.get_or_insert_with(|| (pass_index, pass_index)).1 = pass_index;
+                input
+                    .reads
+                    .get_or_insert_with(|| (pass_index, pass_index))
+                    .1 = pass_index;
                 unimplemented!()
             }
 
@@ -332,7 +345,11 @@ impl<P> GraphBuilder<P> {
             }
         }
 
-        let mut links: Vec<PassLinks> = self.passes.iter().enumerate().map(|(pass_index, pass)| pass.links(pass_index, |a| &descs[&a])).collect();
+        let mut links: Vec<PassLinks> = self.passes
+            .iter()
+            .enumerate()
+            .map(|(pass_index, pass)| pass.links(pass_index, |a| &descs[&a]))
+            .collect();
 
         // Add `Presentation` as fake pass.
         links.push(PassLinks {
@@ -345,34 +362,38 @@ impl<P> GraphBuilder<P> {
                         usage: ImageUsage::empty(),
                         access: ImageAccess::empty(),
                         layout: ImageLayout::Present,
-                    }
-                }
+                    },
+                },
             ],
         });
 
-        let mut chains = GraphChains::new(self.chain_id_buffer.start, self.chain_id_image.start, &links);
+        let mut chains = GraphChains::new(
+            self.chain_id_buffer.start,
+            self.chain_id_image.start,
+            &links,
+        );
         for (&attachment, desc) in &descs {
             chains[attachment].init = desc.init;
         }
 
         let mut images = Vec::new();
 
-        let attachment_images = descs.iter().map(|(&attachment, desc)| {
-            let (images, views) = create_target::<B, _, I, E>(
-                desc.format,
-                chains[attachment].usage,
-                &mut allocator,
-                device,
-                &mut images,
-                &mut image_views,
-                self.extent,
-                frames,
-            ).map_err(GraphBuildError::AllocationError)?;
-            Ok((attachment, AttachmentImages {
-                images,
-                views
-            }))
-        }).collect::<Result<HashMap<_, _>, _>>()?;
+        let attachment_images = descs
+            .iter()
+            .map(|(&attachment, desc)| {
+                let (images, views) = create_target::<B, _, I, E>(
+                    desc.format,
+                    chains[attachment].usage,
+                    &mut allocator,
+                    device,
+                    &mut images,
+                    &mut image_views,
+                    self.extent,
+                    frames,
+                ).map_err(GraphBuildError::AllocationError)?;
+                Ok((attachment, AttachmentImages { images, views }))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
 
         let mut passes = Vec::new();
         info!("Build pass nodes from pass builders");
@@ -393,9 +414,7 @@ impl<P> GraphBuilder<P> {
     }
 }
 
-fn reorder_passes<P>(
-    mut unscheduled: Vec<PassBuilder<P>>,
-) -> Vec<PassBuilder<P>> {
+fn reorder_passes<P>(mut unscheduled: Vec<PassBuilder<P>>) -> Vec<PassBuilder<P>> {
     // Ordered passes
     let mut scheduled = vec![];
     let mut deps = vec![];
@@ -530,5 +549,5 @@ where
         views.push(view);
         images.push(image);
     }
-    Ok((istart .. images.len(), vstart .. views.len()))
+    Ok((istart..images.len(), vstart..views.len()))
 }

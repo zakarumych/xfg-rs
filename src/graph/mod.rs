@@ -124,9 +124,7 @@ where
 
                 // Submit buffer
                 queue.submit(
-                    Submission::new()
-                        .promote::<C>()
-                        .submit(Some(cbuf.finish())),
+                    Submission::new().promote::<C>().submit(Some(cbuf.finish())),
                     fence,
                 );
             }

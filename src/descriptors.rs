@@ -99,8 +99,6 @@ where
 }
 
 fn bindings_to_range_desc(bindings: &[DescriptorSetLayoutBinding]) -> Vec<DescriptorRangeDesc> {
-    
-
     let mut descs: Vec<DescriptorRangeDesc> = vec![];
     for binding in bindings {
         let len = descs.len();

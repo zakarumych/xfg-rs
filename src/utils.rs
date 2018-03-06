@@ -48,7 +48,6 @@ fn descriptor_type(i: usize) -> DescriptorType {
     }
 }
 
-
 pub fn image_access_supported_pipeline_stages(access: ImageAccess) -> PipelineStage {
     type PS = PipelineStage;
     type A = ImageAccess;
@@ -56,8 +55,12 @@ pub fn image_access_supported_pipeline_stages(access: ImageAccess) -> PipelineSt
     match access {
         A::COLOR_ATTACHMENT_READ | A::COLOR_ATTACHMENT_WRITE => PS::COLOR_ATTACHMENT_OUTPUT,
         A::TRANSFER_READ | A::TRANSFER_WRITE => PS::TRANSFER,
-        A::SHADER_READ | A::SHADER_WRITE => PS::VERTEX_SHADER | PS::GEOMETRY_SHADER | PS::FRAGMENT_SHADER | PS::COMPUTE_SHADER,
-        A::DEPTH_STENCIL_ATTACHMENT_READ | A::DEPTH_STENCIL_ATTACHMENT_WRITE => PS::EARLY_FRAGMENT_TESTS | PS::LATE_FRAGMENT_TESTS,
+        A::SHADER_READ | A::SHADER_WRITE => {
+            PS::VERTEX_SHADER | PS::GEOMETRY_SHADER | PS::FRAGMENT_SHADER | PS::COMPUTE_SHADER
+        }
+        A::DEPTH_STENCIL_ATTACHMENT_READ | A::DEPTH_STENCIL_ATTACHMENT_WRITE => {
+            PS::EARLY_FRAGMENT_TESTS | PS::LATE_FRAGMENT_TESTS
+        }
         A::HOST_READ | A::HOST_WRITE => PS::HOST,
         A::MEMORY_READ | A::MEMORY_WRITE => PS::empty(),
         A::INPUT_ATTACHMENT_READ => PS::FRAGMENT_SHADER,
@@ -72,7 +75,9 @@ pub fn buffer_access_supported_pipeline_stages(access: BufferAccess) -> Pipeline
         A::TRANSFER_READ | A::TRANSFER_WRITE => PS::TRANSFER,
         A::INDEX_BUFFER_READ | A::VERTEX_BUFFER_READ => PS::VERTEX_INPUT,
         A::INDIRECT_COMMAND_READ => PS::DRAW_INDIRECT,
-        A::CONSTANT_BUFFER_READ | A::SHADER_READ | A::SHADER_WRITE => PS::VERTEX_SHADER | PS::GEOMETRY_SHADER | PS::FRAGMENT_SHADER | PS::COMPUTE_SHADER,
+        A::CONSTANT_BUFFER_READ | A::SHADER_READ | A::SHADER_WRITE => {
+            PS::VERTEX_SHADER | PS::GEOMETRY_SHADER | PS::FRAGMENT_SHADER | PS::COMPUTE_SHADER
+        }
         A::HOST_READ | A::HOST_WRITE => PS::HOST,
         A::MEMORY_READ | A::MEMORY_WRITE => PS::empty(),
     }
