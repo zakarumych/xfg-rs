@@ -7,11 +7,11 @@ use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::command::{ClearValue, CommandBuffer, Primary, Rect, RenderPassInlineEncoder};
+use gfx_hal::command::{ClearValue, CommandBuffer, Primary, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
-                   PipelineStage};
+                   PipelineStage, Rect};
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;

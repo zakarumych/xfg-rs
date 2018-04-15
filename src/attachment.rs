@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::format::Format;
-use gfx_hal::image::{ImageLayout, Usage as ImageUsage};
+use gfx_hal::image::{Layout, Usage as ImageUsage};
 use gfx_hal::pass::{AttachmentLoadOp, AttachmentStoreOp};
 
 /// Attachment declaration.
@@ -155,16 +155,16 @@ impl AttachmentDesc {
         }
     }
 
-    pub(crate) fn image_layout_transition(&self, index: usize) -> Range<ImageLayout> {
+    pub(crate) fn image_layout_transition(&self, index: usize) -> Range<Layout> {
         let start = if self.is_first_touch(index) {
-            ImageLayout::Undefined
+            Layout::Undefined
         } else {
-            ImageLayout::General
+            Layout::General
         };
         let end = if self.is_last_touch(index) && self.is_surface {
-            ImageLayout::Present
+            Layout::Present
         } else {
-            ImageLayout::General
+            Layout::General
         };
         start..end
     }

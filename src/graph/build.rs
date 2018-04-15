@@ -4,9 +4,9 @@ use std::fmt;
 use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::device::{Extent, FramebufferError, ShaderError};
+use gfx_hal::device::{FramebufferError, ShaderError};
 use gfx_hal::format::{Format, Swizzle};
-use gfx_hal::image::{AaMode, Kind, Level, SubresourceRange, Usage as ImageUsage};
+use gfx_hal::image::{Extent, Kind, Level, SubresourceRange, Usage as ImageUsage, ViewKind};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
 use gfx_hal::window::Backbuffer;
@@ -253,6 +253,7 @@ impl<P> GraphBuilder<P> {
                     .map(|image| {
                         device.create_image_view(
                             image,
+                            ViewKind::D2,
                             self.attachments[present.0].format,
                             Swizzle::NO,
                             SubresourceRange {
@@ -591,12 +592,13 @@ where
         "Create target with format: {:#?} and usage: {:#?}",
         format, usage
     );
-    let kind = Kind::D2(extent.width as u16, extent.height as u16, AaMode::Single);
+    let kind = Kind::D2(extent.width, extent.height, 1, 1);
     for _ in 0..frames {
         let image = allocator(kind, 1, format, usage, Properties::DEVICE_LOCAL, device)?;
         let view = device
             .create_image_view(
                 image.borrow(),
+                ViewKind::D2,
                 format,
                 Swizzle::NO,
                 SubresourceRange {

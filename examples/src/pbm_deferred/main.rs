@@ -19,7 +19,7 @@ use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
                        RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::{Aspects, Format, Swizzle};
-use gfx_hal::image::{Access, ImageLayout, SubresourceRange};
+use gfx_hal::image::{Access, Layout, SubresourceRange, ViewKind};
 use gfx_hal::memory::{cast_slice, Barrier, Dependencies, Pod};
 use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, Descriptor, DescriptorSetLayoutBinding,
                    DescriptorSetWrite, DescriptorType, ElemStride, Element, EntryPoint,
@@ -465,6 +465,7 @@ where
                     device
                         .create_image_view(
                             inputs[0],
+                            ViewKind::D2,
                             Format::Rgba32Float,
                             Swizzle::NO,
                             color_range.clone(),
@@ -473,6 +474,7 @@ where
                     device
                         .create_image_view(
                             inputs[1],
+                            ViewKind::D2,
                             Format::Rgba32Float,
                             Swizzle::NO,
                             color_range.clone(),
@@ -481,6 +483,7 @@ where
                     device
                         .create_image_view(
                             inputs[2],
+                            ViewKind::D2,
                             Format::Rgba32Float,
                             Swizzle::NO,
                             color_range.clone(),
@@ -489,6 +492,7 @@ where
                     device
                         .create_image_view(
                             inputs[3],
+                            ViewKind::D2,
                             Format::Rgba32Float,
                             Swizzle::NO,
                             color_range.clone(),
@@ -509,24 +513,24 @@ where
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Image(&views[0], ImageLayout::General)),
+                        descriptors: Some(Descriptor::Image(&views[0], Layout::General)),
                     }).chain(once(DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Image(&views[1], ImageLayout::General)),
+                        descriptors: Some(Descriptor::Image(&views[1], Layout::General)),
                     }))
                         .chain(once(DescriptorSetWrite {
                             set: &set,
                             binding: 2,
                             array_offset: 0,
-                            descriptors: Some(Descriptor::Image(&views[2], ImageLayout::General)),
+                            descriptors: Some(Descriptor::Image(&views[2], Layout::General)),
                         }))
                         .chain(once(DescriptorSetWrite {
                             set: &set,
                             binding: 3,
                             array_offset: 0,
-                            descriptors: Some(Descriptor::Image(&views[3], ImageLayout::General)),
+                            descriptors: Some(Descriptor::Image(&views[3], Layout::General)),
                         }))
                         .chain(once(DescriptorSetWrite {
                             set: &set,
@@ -545,8 +549,8 @@ where
                 }
             });
 
-            let states = (Access::COLOR_ATTACHMENT_WRITE, ImageLayout::General)
-                ..(Access::SHADER_READ, ImageLayout::General);
+            let states = (Access::COLOR_ATTACHMENT_WRITE, Layout::General)
+                ..(Access::SHADER_READ, Layout::General);
             cbuf.pipeline_barrier(
                 PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::FRAGMENT_SHADER,
                 Dependencies::empty(),

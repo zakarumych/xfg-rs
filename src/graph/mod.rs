@@ -13,9 +13,9 @@ use std::borrow::Borrow;
 use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::command::{OneShot, Viewport};
+use gfx_hal::command::{OneShot};
 use gfx_hal::pool::CommandPool;
-use gfx_hal::pso::PipelineStage;
+use gfx_hal::pso::{PipelineStage, Viewport};
 use gfx_hal::queue::CommandQueue;
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 

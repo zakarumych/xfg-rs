@@ -13,11 +13,12 @@ use std::time::{Duration, Instant};
 
 use cgmath::{Deg, Matrix4, PerspectiveFov, SquareMatrix};
 use gfx_hal::{Backend, Device, Instance, PhysicalDevice, Surface};
-use gfx_hal::command::{Rect, Viewport};
-use gfx_hal::device::{Extent, WaitFor};
+use gfx_hal::device::{WaitFor};
 use gfx_hal::format::{ChannelType, Format};
+use gfx_hal::image::{Extent, Tiling, StorageFlags};
 use gfx_hal::memory::Properties;
 use gfx_hal::pool::{CommandPool, CommandPoolCreateFlags};
+use gfx_hal::pso::{Rect, Viewport};
 use gfx_hal::queue::Graphics;
 use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
 
@@ -209,7 +210,9 @@ where
                         kind,
                         level,
                         format,
+                        Tiling::Optimal,
                         usage,
+                        StorageFlags::empty(),
                     )
                 },
             )

@@ -1,6 +1,5 @@
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
-use gfx_hal::device::Extent;
 use gfx_hal::format::Format;
 use gfx_hal::image;
 use gfx_hal::pass;
@@ -224,7 +223,7 @@ where
     pub(crate) fn build<B, E>(
         self,
         device: &B::Device,
-        extent: Extent,
+        extent: image::Extent,
         attachments: &[AttachmentDesc],
         views: &[B::ImageView],
         index: usize,
@@ -298,18 +297,18 @@ where
             let depth_stencil_ref = depth_stencil.as_ref().map(|_| {
                 (
                     inputs.len() + colors.len(),
-                    image::ImageLayout::DepthStencilAttachmentOptimal,
+                    image::Layout::DepthStencilAttachmentOptimal,
                 )
             });
 
             // Configure the only `Subpass` using all attachments
             let subpass = pass::SubpassDesc {
                 colors: &(0..colors.len())
-                    .map(|i| (i + inputs.len(), image::ImageLayout::ColorAttachmentOptimal))
+                    .map(|i| (i + inputs.len(), image::Layout::ColorAttachmentOptimal))
                     .collect::<Vec<_>>(),
                 depth_stencil: depth_stencil_ref.as_ref(),
                 inputs: &(0..inputs.len())
-                    .map(|i| (i, image::ImageLayout::ShaderReadOnlyOptimal))
+                    .map(|i| (i, image::Layout::ShaderReadOnlyOptimal))
                     .collect::<Vec<_>>(),
                 preserves: &[],
             };
