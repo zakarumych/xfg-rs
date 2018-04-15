@@ -11,7 +11,7 @@ use gfx_hal::command::{ClearValue, CommandBuffer, Primary, RenderPassInlineEncod
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
-                   PipelineStage, Rect};
+                   PipelineStage, Viewport};
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
@@ -57,11 +57,11 @@ pub trait PassDesc: Debug {
     fn bindings(&self) -> &[DescriptorSetLayoutBinding];
 
     /// Create builder
-    fn build(self) -> PassBuilder<Self>
+    fn build(self, viewport: Viewport) -> PassBuilder<Self>
     where
         Self: Sized,
     {
-        PassBuilder::new(self)
+        PassBuilder::new(self, viewport)
     }
 }
 
@@ -269,6 +269,7 @@ pub(crate) struct PassNode<B: Backend, P> {
     framebuffer: SuperFramebuffer<B>,
     pass: P,
     inputs: Vec<Vec<usize>>,
+    viewport: Viewport,
     pub(crate) depends: Option<(usize, PipelineStage)>,
 }
 
@@ -344,7 +345,6 @@ where
         cbuf: &mut CommandBuffer<B, C>,
         device: &B::Device,
         images: &[I],
-        rect: Rect,
         frame: SuperFrame<B>,
         aux: &T,
     ) where
@@ -352,6 +352,9 @@ where
         P: Pass<B, T>,
         I: Borrow<B::Image>,
     {
+        cbuf.set_viewports(&[self.viewport.clone()]);
+        cbuf.set_scissors(&[self.viewport.rect]);
+
         // Bind pipeline
         cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
 
@@ -360,7 +363,7 @@ where
             cbuf.begin_render_pass_inline(
                 &self.renderpass,
                 pick(&self.framebuffer, &frame),
-                rect,
+                self.viewport.rect,
                 &self.clears,
             )
         };

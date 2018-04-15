@@ -23,7 +23,7 @@ use gfx_hal::image::{Access, Layout, SubresourceRange, ViewKind};
 use gfx_hal::memory::{cast_slice, Barrier, Dependencies, Pod};
 use gfx_hal::pso::{BlendState, ColorBlendDesc, ColorMask, Descriptor, DescriptorSetLayoutBinding,
                    DescriptorSetWrite, DescriptorType, ElemStride, Element, EntryPoint,
-                   GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet};
+                   GraphicsShaderSet, PipelineStage, ShaderStageFlags, VertexBufferSet, Viewport};
 use gfx_hal::queue::Transfer;
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
@@ -633,7 +633,7 @@ where
 
 type AnyPass = Box<Pass<back::Backend, Scene<back::Backend, ObjectData>>>;
 
-fn graph<'a>(surface_format: Format, graph: &mut GraphBuilder<AnyPass>) {
+fn graph<'a>(viewport: Viewport, surface_format: Format, graph: &mut GraphBuilder<AnyPass>) {
     let ambient_roughness = graph.add_attachment(
         ColorAttachment::new(Format::Rgba32Float)
             .with_clear(ClearColor::Float([0.0, 0.0, 0.0, 0.0])),
@@ -658,7 +658,7 @@ fn graph<'a>(surface_format: Format, graph: &mut GraphBuilder<AnyPass>) {
     );
 
     let prepare = AnyPass::from(Box::new(DrawPbmPrepare))
-        .build()
+        .build(viewport.clone())
         .with_color(ambient_roughness)
         .with_color(emission_metallic)
         .with_color(normal_normal_ambient_occlusion)
@@ -666,7 +666,7 @@ fn graph<'a>(surface_format: Format, graph: &mut GraphBuilder<AnyPass>) {
         .with_depth_stencil(depth);
 
     let shade = AnyPass::from(Box::new(DrawPbmShade))
-        .build()
+        .build(viewport)
         .with_storage(ambient_roughness)
         .with_storage(emission_metallic)
         .with_storage(normal_normal_ambient_occlusion)

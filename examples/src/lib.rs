@@ -88,7 +88,7 @@ pub struct Scene<B: Backend, T = ()> {
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
 pub fn run<G, F, P, T>(_: G, _: F)
 where
-    G: FnOnce(Format, &mut GraphBuilder<P>),
+    G: FnOnce(Viewport, Format, &mut GraphBuilder<P>),
     P: Pass<back::Backend, Scene<back::Backend, T>>,
     F: FnOnce(&mut Scene<back::Backend, T>, &<back::Backend as Backend>::Device),
 {
@@ -102,7 +102,7 @@ where
 #[deny(dead_code)]
 pub fn run<G, F, P, T>(graph: G, fill: F)
 where
-    G: FnOnce(Format, &mut GraphBuilder<P>),
+    G: FnOnce(Viewport, Format, &mut GraphBuilder<P>),
     P: Pass<back::Backend, Scene<back::Backend, T>>,
     F: FnOnce(&mut Scene<back::Backend, T>, &<back::Backend as Backend>::Device),
 {
@@ -193,7 +193,19 @@ where
 
     let mut graph = {
         let mut builder = GraphBuilder::new();
-        graph(surface_format, &mut builder);
+        graph(
+            Viewport {
+                rect: Rect {
+                    x: 0,
+                    y: 0,
+                    w: width as u16,
+                    h: height as u16,
+                },
+                depth: 0.0..1.0,
+            },
+            surface_format,
+            &mut builder,
+        );
         builder
             .with_extent(Extent {
                 width: width as u32,
@@ -304,15 +316,6 @@ where
             frame,
             &acquire,
             &release,
-            Viewport {
-                rect: Rect {
-                    x: 0,
-                    y: 0,
-                    w: width as u16,
-                    h: height as u16,
-                },
-                depth: 0.0..1.0,
-            },
             &finish,
             &device,
             &mut scene,

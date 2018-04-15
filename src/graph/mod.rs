@@ -15,7 +15,7 @@ use std::ops::Range;
 use gfx_hal::{Backend, Device};
 use gfx_hal::command::{OneShot};
 use gfx_hal::pool::CommandPool;
-use gfx_hal::pso::{PipelineStage, Viewport};
+use gfx_hal::pso::{PipelineStage};
 use gfx_hal::queue::CommandQueue;
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
@@ -91,7 +91,6 @@ where
         frame: SuperFrame<B>,
         acquire: &B::Semaphore,
         release: &B::Semaphore,
-        viewport: Viewport,
         finish: &B::Fence,
         device: &B::Device,
         aux: &mut T,
@@ -112,13 +111,9 @@ where
             // Pick buffer
             let mut cbuf = pool.acquire_command_buffer::<OneShot>(false);
 
-            // Setup
-            cbuf.set_viewports(&[viewport.clone()]);
-            cbuf.set_scissors(&[viewport.rect]);
-
             // Record commands for pass
             pass.prepare(&mut cbuf, device, images, frame, aux);
-            pass.draw_inline(&mut cbuf, device, images, viewport.rect, frame, aux);
+            pass.draw_inline(&mut cbuf, device, images, frame, aux);
 
             {
                 // If it renders to acquired image

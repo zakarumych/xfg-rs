@@ -28,6 +28,7 @@ pub struct PassBuilder<P> {
     pub(crate) depth_stencil: Option<(AttachmentRef, pso::DepthStencilDesc)>,
     rasterizer: pso::Rasterizer,
     primitive: Primitive,
+    viewport: pso::Viewport,
     pass: P,
 }
 
@@ -36,7 +37,7 @@ where
     P: PassDesc,
 {
     /// Construct a `PassBuilder` using the given `Pass`.
-    pub fn new(pass: P) -> Self {
+    pub fn new(pass: P, viewport: pso::Viewport) -> Self {
         PassBuilder {
             sampled: Vec::new(),
             storages: Vec::new(),
@@ -45,6 +46,7 @@ where
             depth_stencil: None,
             rasterizer: pso::Rasterizer::FILL,
             primitive: Primitive::TriangleList,
+            viewport,
             pass,
         }
     }
@@ -475,6 +477,7 @@ where
             pass: self.pass,
             depends: None,
             inputs,
+            viewport: self.viewport,
         })
     }
 }

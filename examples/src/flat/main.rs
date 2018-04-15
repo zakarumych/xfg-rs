@@ -20,7 +20,7 @@ use gfx_hal::format::Format;
 use gfx_hal::memory::{cast_slice, Pod};
 use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
                    ElemStride, Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags,
-                   VertexBufferSet};
+                   VertexBufferSet, Viewport};
 use gfx_hal::queue::Transfer;
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
@@ -415,7 +415,7 @@ where
     }
 }
 
-fn graph(surface_format: Format, graph: &mut GraphBuilder<DrawFlat>) {
+fn graph(viewport: Viewport, surface_format: Format, graph: &mut GraphBuilder<DrawFlat>) {
     let color = graph.add_attachment(
         ColorAttachment::new(surface_format).with_clear(ClearColor::Float([0.3, 0.4, 0.5, 1.0])),
     );
@@ -423,7 +423,7 @@ fn graph(surface_format: Format, graph: &mut GraphBuilder<DrawFlat>) {
         DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)),
     );
 
-    let pass = DrawFlat.build().with_color(color).with_depth_stencil(depth);
+    let pass = DrawFlat.build(viewport).with_color(color).with_depth_stencil(depth);
 
     graph.add_pass(pass).set_present(color);
 }
