@@ -1,3 +1,5 @@
+use std::borrow::BorrowMut;
+
 use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, ClearValue};
 use gfx_hal::format::Format;
@@ -44,11 +46,23 @@ where
             inputs: Vec::new(),
             colors: Vec::new(),
             depth_stencil: None,
-            rasterizer: pso::Rasterizer::FILL,
-            primitive: Primitive::TriangleList,
+            rasterizer: pass.rasterizer(),
+            primitive: pass.primitive(),
             viewport,
             pass,
         }
+    }
+
+    /// Specify geometric primitive.
+    pub fn with_primitive(mut self, primitive: Primitive) -> Self {
+        self.primitive = primitive;
+        self
+    }
+
+    /// Specify geometric primitive.
+    pub fn set_primitive(&mut self, primitive: Primitive) -> &mut Self {
+        self.primitive = primitive;
+        self
     }
 
     /// Specify attachment to be sampled in pass.
@@ -222,9 +236,9 @@ where
     }
 
     /// Build the `PassNode` that will be added to the rendering `Graph`.
-    pub(crate) fn build<B, E>(
+    pub(crate) fn build<B, D, E>(
         self,
-        device: &B::Device,
+        device: &mut D,
         extent: image::Extent,
         attachments: &[AttachmentDesc],
         views: &[B::ImageView],
@@ -232,7 +246,8 @@ where
     ) -> Result<PassNode<B, P>, GraphBuildError<E>>
     where
         B: Backend,
-        P: PassShaders<B>,
+        D: BorrowMut<B::Device>,
+        P: PassShaders<B, D>,
     {
         debug!("Build pass from {:?}", self);
 
@@ -315,7 +330,7 @@ where
                 preserves: &[],
             };
 
-            let renderpass = device.create_render_pass(
+            let renderpass = device.borrow_mut().create_render_pass(
                 &inputs
                     .chain(colors)
                     .chain(depth_stencil)
@@ -328,9 +343,11 @@ where
             renderpass
         };
 
-        let descriptors = DescriptorPool::new(&self.pass.bindings(), device);
+        let descriptors = DescriptorPool::new(&self.pass.bindings(), device.borrow_mut());
 
-        let pipeline_layout = device.create_pipeline_layout(Some(descriptors.layout()), &[]);
+        let pipeline_layout = device
+            .borrow_mut()
+            .create_pipeline_layout(Some(descriptors.layout()), &[]);
         debug!("Pipeline layout: {:?}", pipeline_layout);
 
         let mut shaders = SmallVec::new();
@@ -361,6 +378,7 @@ where
 
             // Create `GraphicsPipeline`
             let graphics_pipeline = device
+                .borrow_mut()
                 .create_graphics_pipelines(&[pipeline_desc])
                 .pop()
                 .unwrap()?;
@@ -370,7 +388,7 @@ where
         };
 
         for module in shaders {
-            device.destroy_shader_module(module);
+            device.borrow_mut().destroy_shader_module(module);
         }
 
         // This color will be set to targets that aren't get cleared
@@ -437,7 +455,11 @@ where
                 SuperFramebuffer::Owned(frames
                     .iter()
                     .map(|targets| {
-                        device.create_framebuffer(&renderpass, targets.iter().cloned(), extent)
+                        device.borrow_mut().create_framebuffer(
+                            &renderpass,
+                            targets.iter().cloned(),
+                            extent,
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>()?)
             }

@@ -1,4 +1,4 @@
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::error::Error;
 use std::fmt;
 use std::ops::Range;
@@ -9,7 +9,7 @@ use gfx_hal::format::{Format, Swizzle};
 use gfx_hal::image::{Extent, Kind, Level, SubresourceRange, Usage as ImageUsage, ViewKind};
 use gfx_hal::memory::Properties;
 use gfx_hal::pso::{CreationError, PipelineStage};
-use gfx_hal::window::Backbuffer;
+use gfx_hal::window::{Backbuffer, Extent2D};
 
 use attachment::{Attachment, AttachmentDesc, AttachmentRef};
 use graph::Graph;
@@ -107,7 +107,7 @@ pub struct GraphBuilder<P> {
     attachments: Vec<Attachment>,
     passes: Vec<PassBuilder<P>>,
     present: Option<AttachmentRef>,
-    extent: Extent,
+    extent: Extent2D,
 }
 
 impl<P> GraphBuilder<P> {
@@ -117,10 +117,9 @@ impl<P> GraphBuilder<P> {
             attachments: Vec::new(),
             passes: Vec::new(),
             present: None,
-            extent: Extent {
+            extent: Extent2D {
                 width: 0,
                 height: 0,
-                depth: 0,
             },
         }
     }
@@ -180,8 +179,8 @@ impl<P> GraphBuilder<P> {
     ///
     /// ### Parameters:
     ///
-    /// - `extent`: hal `Extent`
-    pub fn with_extent(mut self, extent: Extent) -> Self {
+    /// - `extent`: hal `Extent2D`
+    pub fn with_extent(mut self, extent: Extent2D) -> Self {
         self.set_extent(extent);
         self
     }
@@ -190,8 +189,8 @@ impl<P> GraphBuilder<P> {
     ///
     /// ### Parameters:
     ///
-    /// - `extent`: hal `Extent`
-    pub fn set_extent(&mut self, extent: Extent) -> &mut Self {
+    /// - `extent`: hal `Extent2D`
+    pub fn set_extent(&mut self, extent: Extent2D) -> &mut Self {
         self.extent = extent;
         self
     }
@@ -228,17 +227,18 @@ impl<P> GraphBuilder<P> {
     /// - `A`: allocator function
     /// - `I`: render target image type
     /// - `E`: errors returned by the allocator function
-    pub fn build<B, A, I, E>(
+    pub fn build<B, D, A, I, E>(
         self,
-        device: &B::Device,
+        device: &mut D,
         backbuffer: &Backbuffer<B>,
         mut allocator: A,
     ) -> Result<Graph<B, I, P>, GraphBuildError<E>>
     where
         B: Backend,
-        A: FnMut(Kind, Level, Format, ImageUsage, Properties, &B::Device) -> Result<I, E>,
+        D: BorrowMut<B::Device>,
+        A: FnMut(Kind, Level, Format, ImageUsage, Properties, &mut D) -> Result<I, E>,
         I: Borrow<B::Image>,
-        P: PassShaders<B>,
+        P: PassShaders<B, D>,
     {
         info!("Building graph from {:?}", self);
         let present = self.present
@@ -251,7 +251,7 @@ impl<P> GraphBuilder<P> {
                 images
                     .iter()
                     .map(|image| {
-                        device.create_image_view(
+                        device.borrow_mut().create_image_view(
                             image,
                             ViewKind::D2,
                             self.attachments[present.0].format,
@@ -264,7 +264,7 @@ impl<P> GraphBuilder<P> {
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()
-                    .expect("Views are epxected to be created"),
+                    .expect("Views are expected to be created"),
                 images.len(),
             ),
             Backbuffer::Framebuffer(_) => (vec![], 1),
@@ -376,7 +376,7 @@ impl<P> GraphBuilder<P> {
                 let ref mut color = attachments[color.0.index()];
                 if color.views.is_none() {
                     debug_assert!(color.images.is_none());
-                    create_target::<B, _, I, E>(
+                    create_target::<B, D, _, I, E>(
                         color.format,
                         color.usage,
                         &mut allocator,
@@ -386,8 +386,8 @@ impl<P> GraphBuilder<P> {
                         self.extent,
                         frames,
                     ).map_err(GraphBuildError::AllocationError)?;
-                    color.views = Some((image_views.len() - frames..image_views.len()));
-                    color.images = Some((images.len() - frames..images.len()));
+                    color.views = Some(image_views.len() - frames..image_views.len());
+                    color.images = Some(images.len() - frames..images.len());
                 }
             }
 
@@ -396,7 +396,7 @@ impl<P> GraphBuilder<P> {
                 let ref mut depth_stencil = attachments[depth_stencil.0.index()];
                 if depth_stencil.views.is_none() {
                     debug_assert!(depth_stencil.images.is_none());
-                    create_target::<B, _, I, E>(
+                    create_target::<B, D, _, I, E>(
                         depth_stencil.format,
                         depth_stencil.usage,
                         &mut allocator,
@@ -406,15 +406,21 @@ impl<P> GraphBuilder<P> {
                         self.extent,
                         frames,
                     ).map_err(GraphBuildError::AllocationError)?;
-                    depth_stencil.views = Some((image_views.len() - frames..image_views.len()));
-                    depth_stencil.images = Some((images.len() - frames..images.len()));
+                    depth_stencil.views = Some(image_views.len() - frames..image_views.len());
+                    depth_stencil.images = Some(images.len() - frames..images.len());
                 }
             }
         }
 
         info!("Build pass nodes from pass builders");
         for ((pass_index, pass), last_dep) in passes.into_iter().enumerate().zip(deps) {
-            let mut node = pass.build(device, self.extent, &attachments, &image_views, pass_index)?;
+            let mut node = pass.build(
+                device,
+                to3d(self.extent),
+                &attachments,
+                &image_views,
+                pass_index,
+            )?;
 
             if let Some(last_dep) = last_dep {
                 node.depends = if pass_nodes
@@ -457,7 +463,7 @@ impl<P> GraphBuilder<P> {
                             .unwrap_or(false))
                         .is_none()
                 );
-                signals.push(Some(device.create_semaphore()));
+                signals.push(Some(device.borrow_mut().create_semaphore()));
             } else {
                 signals.push(None);
             }
@@ -573,19 +579,20 @@ fn dependencies<P>(passes: &[PassBuilder<P>], pass: &PassBuilder<P>) -> Vec<usiz
     deps
 }
 
-fn create_target<B, A, I, E>(
+fn create_target<B, D, A, I, E>(
     format: Format,
     usage: ImageUsage,
     mut allocator: A,
-    device: &B::Device,
+    device: &mut D,
     images: &mut Vec<I>,
     views: &mut Vec<B::ImageView>,
-    extent: Extent,
+    extent: Extent2D,
     frames: usize,
 ) -> Result<(), E>
 where
     B: Backend,
-    A: FnMut(Kind, Level, Format, ImageUsage, Properties, &B::Device) -> Result<I, E>,
+    D: BorrowMut<B::Device>,
+    A: FnMut(Kind, Level, Format, ImageUsage, Properties, &mut D) -> Result<I, E>,
     I: Borrow<B::Image>,
 {
     debug!(
@@ -596,6 +603,7 @@ where
     for _ in 0..frames {
         let image = allocator(kind, 1, format, usage, Properties::DEVICE_LOCAL, device)?;
         let view = device
+            .borrow_mut()
             .create_image_view(
                 image.borrow(),
                 ViewKind::D2,
@@ -612,4 +620,12 @@ where
         images.push(image);
     }
     Ok(())
+}
+
+fn to3d(extent: Extent2D) -> Extent {
+    Extent {
+        width: extent.width,
+        height: extent.height,
+        depth: 1,
+    }
 }

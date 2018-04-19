@@ -9,13 +9,13 @@
 
 pub use self::build::{GraphBuildError, GraphBuilder};
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::ops::Range;
 
 use gfx_hal::{Backend, Device};
-use gfx_hal::command::{OneShot};
+use gfx_hal::command::OneShot;
 use gfx_hal::pool::CommandPool;
-use gfx_hal::pso::{PipelineStage};
+use gfx_hal::pso::PipelineStage;
 use gfx_hal::queue::CommandQueue;
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
@@ -84,7 +84,7 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn draw_inline<C, T>(
+    pub fn draw_inline<C, D, T>(
         &mut self,
         queue: &mut CommandQueue<B, C>,
         pool: &mut CommandPool<B, C>,
@@ -92,11 +92,12 @@ where
         acquire: &B::Semaphore,
         release: &B::Semaphore,
         finish: &B::Fence,
-        device: &B::Device,
+        device: &mut D,
         aux: &mut T,
     ) where
         C: Supports<Graphics> + Supports<Transfer>,
-        P: Pass<B, T>,
+        D: BorrowMut<B::Device>,
+        P: Pass<B, D, T>,
         I: Borrow<B::Image>,
     {
         use gfx_hal::queue::submission::Submission;
@@ -168,19 +169,20 @@ where
     /// ### Type parameters:
     ///
     /// - `F`: deallocator function
-    pub fn dispose<F, T>(self, mut deallocator: F, device: &B::Device, aux: &mut T)
+    pub fn dispose<F, D, T>(self, mut deallocator: F, device: &mut D, aux: &mut T)
     where
-        F: FnMut(I, &B::Device),
-        P: Pass<B, T>,
+        F: FnMut(I, &D),
+        D: BorrowMut<B::Device>,
+        P: Pass<B, D, T>,
     {
         for pass in self.passes {
             pass.dispose(device, aux);
         }
         for signal in self.signals.into_iter().filter_map(|x| x) {
-            device.destroy_semaphore(signal);
+            device.borrow_mut().destroy_semaphore(signal);
         }
         for view in self.views {
-            device.destroy_image_view(view);
+            device.borrow_mut().destroy_image_view(view);
         }
         for image in self.images {
             deallocator(image, device);

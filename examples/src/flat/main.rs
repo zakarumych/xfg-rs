@@ -423,7 +423,10 @@ fn graph(viewport: Viewport, surface_format: Format, graph: &mut GraphBuilder<Dr
         DepthStencilAttachment::new(Format::D32Float).with_clear(ClearDepthStencil(1.0, 0)),
     );
 
-    let pass = DrawFlat.build(viewport).with_color(color).with_depth_stencil(depth);
+    let pass = DrawFlat
+        .build(viewport)
+        .with_color(color)
+        .with_depth_stencil(depth);
 
     graph.add_pass(pass).set_present(color);
 }

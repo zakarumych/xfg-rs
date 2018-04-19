@@ -2,16 +2,16 @@
 
 pub use self::build::PassBuilder;
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
-use gfx_hal::{Backend, Device};
+use gfx_hal::{Backend, Device, Primitive};
 use gfx_hal::command::{ClearValue, CommandBuffer, Primary, RenderPassInlineEncoder};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::pso::{DescriptorSetLayoutBinding, ElemStride, Element, GraphicsShaderSet,
-                   PipelineStage, Viewport};
+                   PipelineStage, Rasterizer, Viewport};
 use gfx_hal::queue::capability::{Graphics, Supports, Transfer};
 
 use smallvec::SmallVec;
@@ -56,6 +56,16 @@ pub trait PassDesc: Debug {
     /// Bindings for the descriptor sets used by the pass
     fn bindings(&self) -> &[DescriptorSetLayoutBinding];
 
+    /// Default primitve for the pass.
+    fn primitive(&self) -> Primitive {
+        Primitive::TriangleList
+    }
+
+    /// Default rasterizer for the pass.
+    fn rasterizer(&self) -> Rasterizer {
+        Rasterizer::FILL
+    }
+
     /// Create builder
     fn build(self, viewport: Viewport) -> PassBuilder<Self>
     where
@@ -97,12 +107,21 @@ where
     fn bindings(&self) -> &[DescriptorSetLayoutBinding] {
         P::bindings(self)
     }
+
+    fn primitive(&self) -> Primitive {
+        P::primitive(self)
+    }
+
+    fn rasterizer(&self) -> Rasterizer {
+        P::rasterizer(self)
+    }
 }
 
 /// Trait to load shaders for `Pass`.
-pub trait PassShaders<B>: PassDesc
+pub trait PassShaders<B, D>: PassDesc
 where
     B: Backend,
+    D: BorrowMut<B::Device>,
 {
     /// Load shaders
     ///
@@ -122,20 +141,21 @@ where
     fn shaders<'a>(
         &'a self,
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
-        device: &B::Device,
+        device: &mut D,
     ) -> Result<GraphicsShaderSet<'a, B>, ShaderError>;
 }
 
-impl<B, P, Y> PassShaders<B> for Y
+impl<B, D, P, Y> PassShaders<B, D> for Y
 where
     B: Backend,
+    D: BorrowMut<B::Device>,
     Y: Debug + Deref<Target = P>,
-    P: PassShaders<B> + ?Sized + 'static,
+    P: PassShaders<B, D> + ?Sized + 'static,
 {
     fn shaders<'a>(
         &'a self,
         shaders: &'a mut SmallVec<[B::ShaderModule; 5]>,
-        device: &B::Device,
+        device: &mut D,
     ) -> Result<GraphicsShaderSet<'a, B>, ShaderError> {
         P::shaders(self, shaders, device)
     }
@@ -150,11 +170,13 @@ where
 /// ### Type parameters:
 ///
 /// - `B`: render `Backend`
+/// - `D`: device
 /// - `T`: auxiliary data used by the `Pass`, can be anything the `Pass` requires, such as meshes,
 ///        caches, etc
-pub trait Pass<B, T>: PassShaders<B>
+pub trait Pass<B, D, T>: PassShaders<B, D>
 where
     B: Backend,
+    D: BorrowMut<B::Device>,
 {
     /// Make preparation for actual drawing commands.
     ///
@@ -174,11 +196,11 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: Hal `Capability`
-    fn prepare<'a>(
+    fn prepare(
         &mut self,
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
-        device: &B::Device,
+        device: &mut D,
         inputs: &[&B::Image],
         frame: usize,
         aux: &mut T,
@@ -195,11 +217,11 @@ where
     /// - `encoder`: encoder used to record drawing commands
     /// - `device`: graphics device
     /// - `aux`: auxiliary data
-    fn draw_inline<'a>(
+    fn draw_inline(
         &mut self,
         layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B, Primary>,
-        device: &B::Device,
+        device: &D,
         inputs: &[&B::Image],
         frame: usize,
         aux: &T,
@@ -213,20 +235,21 @@ where
     /// - `device`: graphics device
     /// - `aux`: Auxiliary pass data, if the pass have anything stored there that needs to be
     ///          disposed
-    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T);
+    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &mut D, aux: &mut T);
 }
 
-impl<B, P, T, Y> Pass<B, T> for Y
+impl<B, D, T, P, Y> Pass<B, D, T> for Y
 where
     B: Backend,
+    D: BorrowMut<B::Device>,
+    P: Pass<B, D, T> + ?Sized + 'static,
     Y: Debug + DerefMut<Target = P>,
-    P: Pass<B, T> + ?Sized + 'static,
 {
     fn prepare<'a>(
         &mut self,
         pool: &mut DescriptorPool<B>,
         cbuf: &mut CommandBuffer<B, Transfer>,
-        device: &B::Device,
+        device: &mut D,
         inputs: &[&B::Image],
         frame: usize,
         aux: &mut T,
@@ -238,7 +261,7 @@ where
         &mut self,
         layout: &B::PipelineLayout,
         encoder: RenderPassInlineEncoder<B, Primary>,
-        device: &B::Device,
+        device: &D,
         inputs: &[&B::Image],
         frame: usize,
         aux: &T,
@@ -246,7 +269,7 @@ where
         P::draw_inline(self, layout, encoder, device, inputs, frame, aux)
     }
 
-    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &B::Device, aux: &mut T) {
+    fn cleanup(&mut self, pool: &mut DescriptorPool<B>, device: &mut D, aux: &mut T) {
         P::cleanup(self, pool, device, aux)
     }
 }
@@ -291,16 +314,17 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn prepare<C, T, I>(
+    pub fn prepare<C, D, T, I>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
-        device: &B::Device,
+        device: &mut D,
         images: &[I],
         frame: SuperFrame<B>,
         aux: &mut T,
     ) where
         C: Supports<Transfer>,
-        P: Pass<B, T>,
+        D: BorrowMut<B::Device>,
+        P: Pass<B, D, T>,
         I: Borrow<B::Image>,
     {
         let inputs = self.inputs
@@ -340,16 +364,17 @@ where
     /// ### Type parameters:
     ///
     /// - `C`: hal `Capability`
-    pub fn draw_inline<C, T, I>(
+    pub fn draw_inline<C, D, T, I>(
         &mut self,
         cbuf: &mut CommandBuffer<B, C>,
-        device: &B::Device,
+        device: &D,
         images: &[I],
         frame: SuperFrame<B>,
         aux: &T,
     ) where
         C: Supports<Graphics>,
-        P: Pass<B, T>,
+        D: BorrowMut<B::Device>,
+        P: Pass<B, D, T>,
         I: Borrow<B::Image>,
     {
         cbuf.set_viewports(&[self.viewport.clone()]);
@@ -397,19 +422,24 @@ where
     ///
     /// - `device`: graphics device
     /// - `aux`: auxiliary data for the inner `Pass`
-    pub fn dispose<T>(mut self, device: &B::Device, aux: &mut T)
+    pub fn dispose<D, T>(mut self, device: &mut D, aux: &mut T)
     where
-        P: Pass<B, T>,
+        D: BorrowMut<B::Device>,
+        P: Pass<B, D, T>,
     {
         self.pass.cleanup(&mut self.descriptors, device, aux);
         match self.framebuffer {
             SuperFramebuffer::Owned(framebuffers) => for framebuffer in framebuffers {
-                device.destroy_framebuffer(framebuffer);
+                device.borrow_mut().destroy_framebuffer(framebuffer);
             },
             _ => {}
         }
-        device.destroy_render_pass(self.renderpass);
-        device.destroy_graphics_pipeline(self.graphics_pipeline);
-        device.destroy_pipeline_layout(self.pipeline_layout);
+        device.borrow_mut().destroy_render_pass(self.renderpass);
+        device
+            .borrow_mut()
+            .destroy_graphics_pipeline(self.graphics_pipeline);
+        device
+            .borrow_mut()
+            .destroy_pipeline_layout(self.pipeline_layout);
     }
 }
