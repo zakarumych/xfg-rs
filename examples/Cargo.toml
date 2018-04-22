@@ -9,13 +9,13 @@ publish = false
 cgmath = "0.16"
 env_logger = "0.5"
 genmesh = "0.5.0"
-gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "efa0822a" }
-gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "efa0822a" }
-gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx", rev = "efa0822a" }
-gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "efa0822a" }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "efa0822a" }
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "efa0822a" }
-gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "5d0b31a0" }
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "1083ce9a" }
+gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "1083ce9a" }
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx", rev = "1083ce9a" }
+gfx-backend-metal = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "1083ce9a" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true, rev = "1083ce9a" }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "1083ce9a" }
+gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "9125d94e" }
 log = "0.4"
 smallvec = "0.4"
 winit = "0.11"

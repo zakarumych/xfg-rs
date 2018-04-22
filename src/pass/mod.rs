@@ -377,8 +377,8 @@ where
         P: Pass<B, D, T>,
         I: Borrow<B::Image>,
     {
-        cbuf.set_viewports(&[self.viewport.clone()]);
-        cbuf.set_scissors(&[self.viewport.rect]);
+        cbuf.set_viewports(0, &[self.viewport.clone()]);
+        cbuf.set_scissors(0, &[self.viewport.rect]);
 
         // Bind pipeline
         cbuf.bind_graphics_pipeline(&self.graphics_pipeline);

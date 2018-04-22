@@ -80,6 +80,7 @@ where
                 .allocate_sets(Some(&self.layout))
                 .pop()
                 .unwrap()
+                .unwrap()
         } else {
             // get unused set
             self.sets.pop().unwrap()
