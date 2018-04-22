@@ -434,10 +434,11 @@ where
             },
             _ => {}
         }
-        device.borrow_mut().destroy_render_pass(self.renderpass);
         device
             .borrow_mut()
             .destroy_graphics_pipeline(self.graphics_pipeline);
+        // ::std::mem::forget(self.graphics_pipeline);
+        device.borrow_mut().destroy_render_pass(self.renderpass);
         device
             .borrow_mut()
             .destroy_pipeline_layout(self.pipeline_layout);

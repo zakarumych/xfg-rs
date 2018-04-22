@@ -171,7 +171,7 @@ where
     /// - `F`: deallocator function
     pub fn dispose<F, D, T>(self, mut deallocator: F, device: &mut D, aux: &mut T)
     where
-        F: FnMut(I, &D),
+        F: FnMut(I, &mut D),
         D: BorrowMut<B::Device>,
         P: Pass<B, D, T>,
     {

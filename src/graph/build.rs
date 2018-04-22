@@ -475,7 +475,7 @@ impl<P> GraphBuilder<P> {
             images,
             views: image_views,
             frames,
-            draws_to_surface: attachments[present.0].write.clone().unwrap(),
+            draws_to_surface: attachments[present.0].write.clone().unwrap_or(0..0),
         })
     }
 }
