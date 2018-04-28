@@ -8,7 +8,8 @@ repository = "https://github.com/omni-viral/xfg-rs"
 
 [dependencies]
 derivative = "1.0"
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "1083ce9a" }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "54fe14fbb" }
+gfx-chain = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-chain" }
 log = "0.4"
 relevant = "0.1"
 smallvec = "0.4"
@@ -21,3 +22,10 @@ winit = "0.11"
 
 [workspace]
 members = ["examples"]
+
+
+[patch.'https://github.com/omni-viral/gfx-chain']
+gfx-chain = { path = "../gfx-chain" }
+
+[patch.'https://github.com/gfx-rs/gfx']
+gfx-hal = { path = "../gfx/src/hal" }
