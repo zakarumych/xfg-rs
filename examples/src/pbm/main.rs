@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, Transform};
 
-use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
                        RenderPassInlineEncoder};
@@ -24,6 +23,7 @@ use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, D
                    ElemStride, Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags,
                    VertexBufferSet, Viewport};
 use gfx_hal::queue::Transfer;
+use gfx_hal::{Backend, Device, IndexType};
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
 use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
@@ -417,8 +417,8 @@ fn create_sphere<B>(device: &B::Device, factory: &mut SmartAllocator<B>) -> Mesh
 where
     B: Backend,
 {
-    use genmesh::{EmitTriangles, Triangle};
     use genmesh::generators::{IndexedPolygon, SharedVertex, SphereUV};
+    use genmesh::{EmitTriangles, Triangle};
 
     let sphere = SphereUV::new(40, 20);
 

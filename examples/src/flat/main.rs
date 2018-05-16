@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use cgmath::{Deg, Matrix4, Transform};
 
-use gfx_hal::{Backend, Device, IndexType};
 use gfx_hal::buffer::{IndexBufferView, Usage};
 use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
                        RenderPassInlineEncoder};
@@ -22,6 +21,7 @@ use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, D
                    ElemStride, Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags,
                    VertexBufferSet, Viewport};
 use gfx_hal::queue::Transfer;
+use gfx_hal::{Backend, Device, IndexType};
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
 use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
