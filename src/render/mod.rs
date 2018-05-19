@@ -6,18 +6,27 @@ use hal::{ Backend, Device, buffer, image, Primitive,
     format::Format,
     image::Extent,
     queue::Graphics,
-    pass::{Attachment, AttachmentOps, AttachmentLoadOp, AttachmentStoreOp, SubpassDesc},
+    pass::{Attachment, AttachmentOps, AttachmentLoadOp, AttachmentStoreOp, SubpassDesc, Subpass, SubpassDependency},
     pool::{CommandPool, CommandPoolCreateFlags},
-    pso::{Element, ElemStride, VertexBufferDesc, PipelineStage, AttributeDesc, InputAssemblerDesc, PrimitiveRestart, ColorBlendDesc, ColorMask, BlendState, DepthTest, DepthStencilDesc, StencilTest, Comparison, BakedStates, Subpass, BasePipeline},
+    pso::{
+        Element, ElemStride, VertexBufferDesc, PipelineStage,
+        AttributeDesc, InputAssemblerDesc, PrimitiveRestart,
+        ColorBlendDesc, ColorMask, BlendState, DepthTest, DepthStencilDesc,
+        StencilTest, Comparison, BakedStates, BasePipeline, Rasterizer,
+        PipelineCreationFlags, DescriptorSetLayoutBinding, BufferIndex,
+        GraphicsShaderSet, BlendDesc, GraphicsPipelineDesc, ShaderStageFlags,
+    },
 };
 
+use smallvec::SmallVec;
+
 use id::{BufferId, ImageId};
-use node::{Node, NodeDesc, Submittables, EitherSubmit};
+use node::{Node, NodeDesc, Submittables, EitherSubmit, BufferInfo, ImageInfo};
 
 /// Render pass desc.
 pub trait RenderPassDesc: Send + Sync + Sized + 'static {
     /// Name of this pass.
-    fn name() -> &str;
+    fn name() -> &'static str;
 
     /// Number of images to sample.
     fn sampled() -> usize;
@@ -29,10 +38,10 @@ pub trait RenderPassDesc: Send + Sync + Sized + 'static {
     fn depth() -> bool;
 
     /// Format of vertices.
-    fn vertices() -> &[(&[Element<Format>], ElemStride)];
+    fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)];
 
     /// Bindings for the pass.
-    fn bindings() -> &[DescriptorSetLayoutBinding];
+    fn bindings() -> &'static [DescriptorSetLayoutBinding];
 }
 
 /// Render pass.
@@ -49,7 +58,7 @@ pub trait RenderPass<B: Backend, D, T>: RenderPassDesc {
     ///
     /// `aux`       - auxiliary data container. May be anything the implementation desires.
     ///
-    fn load_shader_set(storage: &mut Vec<B::ShaderModule>, device: &mut D, aux: &mut T) -> GraphicsShaderSet<B>;
+    fn load_shader_set<'a>(storage: &'a mut Vec<B::ShaderModule>, device: &mut D, aux: &mut T) -> GraphicsShaderSet<'a, B>;
 
     /// Build pass instance.
     fn build(
@@ -59,14 +68,11 @@ pub trait RenderPass<B: Backend, D, T>: RenderPassDesc {
     ) -> Self;
 
     /// Record drawing commands to the command buffer provided.
-    fn run<I>(&mut self, sampled: I, frame: usize, device: &mut D, aux: &T, &mut CommandBuffer<Graphics, B>)
+    fn run<I>(&mut self, sampled: I, frame: usize, device: &mut D, aux: &T, &mut CommandBuffer<B, Graphics>)
     where
         I: IntoIterator,
         I::Item: Borrow<B::Image>,
     ;
-
-    /// Access image resource storage in `T`.
-    fn image(id: ImageId, aux: &mut T) -> Option<&mut I>,
 }
 
 struct Resources<B: Backend> {
@@ -76,7 +82,7 @@ struct Resources<B: Backend> {
 }
 
 /// Render pass node.
-pub struct RenderPassNode<R> {
+pub struct RenderPassNode<B: Backend, R> {
     resources: Vec<Resources<B>>,
     render_pass: B::RenderPass,
     pipeline_layout: B::PipelineLayout,
@@ -85,8 +91,9 @@ pub struct RenderPassNode<R> {
 }
 
 /// Overall description for node.
-impl<R> NodeDesc for RenderPassNode<R>
+impl<B, R> NodeDesc for RenderPassNode<B, R>
 where
+    B: Backend,
     R: RenderPassDesc,
 {
     type Buffers = Empty<(buffer::Usage, buffer::State, PipelineStage)>;
@@ -95,7 +102,7 @@ where
 
     type Capability = Graphics;
 
-    fn name() -> &str {
+    fn name() -> &'static str {
         R::name()
     }
 
@@ -106,29 +113,32 @@ where
     fn images() -> Self::Images {
         let sampled = (0 .. R::sampled()).map(|_| (image::Usage::SAMPLED, (image::Access::SHADER_READ, image::Layout::ShaderReadOnlyOptimal), all_graphics_shaders_stages()));
         let colors = (0 .. R::colors()).map(|_| (image::Usage::COLOR_ATTACHMENT, (image::Access::COLOR_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_WRITE, image::Layout::ColorAttachmentOptimal), all_graphics_shaders_stages()));
-        let depth = if R::depth() { Some((image::Usage::DEPTH_STENCIL_ATTACHMENT, (image::Access::DEPTH_STENCIL_ATTACHMENT_READ | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE, DepthStencilAttachmentOptimal), all_graphics_shaders_stages())) } else { None };
+        let depth = if R::depth() { Some((image::Usage::DEPTH_STENCIL_ATTACHMENT, (image::Access::DEPTH_STENCIL_ATTACHMENT_READ | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE, image::Layout::DepthStencilAttachmentOptimal), all_graphics_shaders_stages())) } else { None };
 
         sampled.chain(colors).chain(depth).collect()
     }
 }
 
-impl<'a, B, D, T, R> Submittables<'a, B: Backend, D, T> for RenderPassNode<R> {
+impl<'a, B, D, T, R> Submittables<'a, B, D, T> for RenderPassNode<B, R>
+where
+    B: Backend,
+    R: RenderPassDesc,
+{
     type Submittable = EitherSubmit<'a, B, Graphics>;
     type IntoIter = SmallVec<[EitherSubmit<'a, B, Graphics>; 3]>;
 }
 
-impl<R> Node<B, D, T> for RenderPassNode<R>
+impl<B, D, T, R> Node<B, D, T> for RenderPassNode<B, R>
 where
     B: Backend,
     D: Device<B>,
-    R: RenderPass<B, D, T>;
+    R: RenderPass<B, D, T>,
 {
     fn build<F>(
-        buffers: Vec<BufferInfo>,
-        images: Vec<ImageInfo>,
+        buffers: Vec<BufferInfo<B>>,
+        images: Vec<ImageInfo<B>>,
         frames: usize,
-        extent: Extent,
-        pools: F,
+        mut pools: F,
         device: &mut D,
         aux: &mut T,
     ) -> Self
@@ -144,7 +154,11 @@ where
                     store: AttachmentStoreOp::Store,
                 },
                 stencil_ops: AttachmentOps::DONT_CARE,
-                layouts: images[index + R::sampled()]
+                layouts: {
+                    let layout = images[index + R::sampled()].layout;
+                    layout .. layout
+                },
+                samples: 1,
             }).chain( if R::depth() {
                 Some(Attachment {
                     format: Some(unimplemented!()),
@@ -153,7 +167,11 @@ where
                         store: AttachmentStoreOp::Store,
                     },
                     stencil_ops: AttachmentOps::DONT_CARE,
-                    layouts: images[index + R::sampled() - R::colors()]
+                    layouts: {
+                        let layout = images[R::sampled() + R::colors()].layout;
+                        layout .. layout
+                    },
+                    samples: 1,
                 })
             } else {
                 None
@@ -165,7 +183,8 @@ where
                 colors: &colors,
                 depth_stencil: depth.as_ref(),
                 inputs: &[],
-                preserved: &[],
+                resolves: &[],
+                preserves: &[],
             };
 
             let result = device.create_render_pass(
@@ -180,7 +199,7 @@ where
 
         trace!("Creating graphics pipeline for '{}'", R::name());
         let descriptor_set_layout = device.create_descriptor_set_layout(R::bindings());
-        let pipeline_layout = device.create_pipeline_layout(Some(&descriptor_set_layout), empty());
+        let pipeline_layout = device.create_pipeline_layout(Some(&descriptor_set_layout), empty::<(ShaderStageFlags, Range<u32>)>());
 
         let graphics_pipeline = {
             let mut shaders = Vec::new();
@@ -189,8 +208,8 @@ where
             let mut vertex_buffers = Vec::new();
             let mut attributes = Vec::new();
 
-            for &(attributes, stride) in self.pass.vertices() {
-                push_vertex_desc(attributes, stride, &mut vertex_buffers, &mut attributes);
+            for &(elemets, stride) in R::vertices() {
+                push_vertex_desc(elemets, stride, &mut vertex_buffers, &mut attributes);
             }
 
             let result = device.create_graphics_pipeline(&GraphicsPipelineDesc {
@@ -203,7 +222,6 @@ where
                     primitive_restart: PrimitiveRestart::Disabled,
                 },
                 blender: BlendDesc {
-                    alpha_coverage: false,
                     logic_op: None,
                     targets: (0 .. R::colors()).map(|index| ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)).collect(),
                 },
@@ -219,6 +237,7 @@ where
                 } else {
                     None
                 },
+                multisampling: None,
                 baked_states: BakedStates::default(),
                 layout: &pipeline_layout,
                 subpass: Subpass {
@@ -234,7 +253,7 @@ where
 
         RenderPassNode {
             resources: (0 .. frames).map(|_| Resources {
-                framebuffer: device.create_framebuffer(&render_pass, &[], extent).unwrap(),
+                framebuffer: device.create_framebuffer(&render_pass, &[], unimplemented!()).unwrap(),
                 pool: pools(device, CommandPoolCreateFlags::empty()),
                 individual_reset_pool: pools(device, CommandPoolCreateFlags::RESET_INDIVIDUAL),
             }).collect(),
@@ -265,33 +284,27 @@ fn all_graphics_shaders_stages() -> PipelineStage {
     PipelineStage::FRAGMENT_SHADER
 }
 
-fn push_vertex_desc<B>(
-    attributes: &[Element<Format>],
+fn push_vertex_desc(
+    elements: &[Element<Format>],
     stride: ElemStride,
     vertex_buffers: &mut Vec<VertexBufferDesc>,
     attributes: &mut Vec<AttributeDesc>,
-) where
-    B: Backend,
-{
+) {
     let index = vertex_buffers.len() as BufferIndex;
 
     vertex_buffers
-        .push(VertexBufferDesc { stride, rate: 0 });
+        .push(VertexBufferDesc { binding: 0, stride, rate: 0 });
 
     let mut location = attributes
         .last()
         .map(|a| a.location + 1)
         .unwrap_or(0);
-    for &attribute in attributes {
+    for &element in elements {
         attributes.push(AttributeDesc {
             location,
             binding: index,
-            element: attribute,
+            element,
         });
         location += 1;
     }
-}
-
-fn depth_stencil_desc(depth: bool) -> Option<DepthStencilDesc> {
-    
 }

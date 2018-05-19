@@ -135,7 +135,7 @@ pub struct ImageInfo<'a, B: Backend> {
 
 /// Convenient enum to hold either `OneShot` command buffer or reference to `MultiShot`.
 /// Implements `Submittable`.
-pub enum EitherSubmit<'a, B: Backend, C: 'a, L: 'a> {
+pub enum EitherSubmit<'a, B: Backend, C: 'a, L: 'a = Primary> {
     /// One shot submit.
     OneShot(Submit<B, C, OneShot, L>),
 

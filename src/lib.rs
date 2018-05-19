@@ -6,7 +6,7 @@ extern crate smallvec;
 mod graph;
 mod id;
 mod node;
-// mod render;
+mod render;
 
 pub use graph::{Graph, GraphBuilder};
 pub use id::{BufferId, ImageId};
