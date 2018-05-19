@@ -5,7 +5,7 @@ use std::{borrow::Borrow, ops::AddAssign};
 use smallvec::SmallVec;
 
 use id::{BufferId, ImageId};
-use node::{Node, build::{AnyNode, NodeBuilder}};
+use node::{Node, wrap::{AnyNode, NodeBuilder}};
 
 pub struct Graph<B: Backend, D, T> {
     nodes: Vec<Box<AnyNode<B, D, T>>>,
@@ -186,7 +186,8 @@ where
             for queue in family.iter() {
                 for (sid, submission) in queue.iter() {
                     let node = self.builders[submission.pass().0].build(
-                        submission.sync(),
+                        submission,
+                        &chains.images,
                         frames,
                         find_family::<B, _>(families.iter().cloned(), sid.family()),
                         device,

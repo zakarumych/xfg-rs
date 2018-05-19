@@ -8,4 +8,4 @@ mod node;
 
 pub use graph::{Graph, GraphBuilder};
 pub use id::{BufferId, ImageId};
-pub use node::{Barriers, Node, NodeDesc, Submittables, build::NodeBuilder};
+pub use node::{Barriers, EitherSubmit, Node, NodeDesc, Submittables, wrap::NodeBuilder};
