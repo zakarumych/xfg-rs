@@ -2,11 +2,12 @@ use std::{borrow::Cow, ops::Range};
 
 use hal::{buffer, image, Backend,
           command::{Level, MultiShot, OneShot, Primary, Submit, Submittable},
+          format::Format,
           pool::{CommandPool, CommandPoolCreateFlags}, pso::PipelineStage, queue::Capability};
 
 use id::{BufferId, ImageId};
 
-pub mod wrap;
+pub mod build;
 
 /// Overall description for node.
 pub trait NodeDesc: Send + Sync + Sized + 'static {
@@ -44,9 +45,9 @@ where
     ///
     /// # Parameters
     ///
-    /// `acquire`   - barriers that must be recorded before any other commands.
+    /// `buffers`   - Information about buffers. One for each returned by `buffers` function.
     ///
-    /// `release`   - barriers that must be recorded after all other commands.
+    /// `images`    - Information about images. One for each returned by `images` function.
     ///
     /// `frames`     - number of frames in swapchain. All non-read-only resources must be allocated per frame.
     ///               `frame` argument of `run` method will be always in `0 .. frames`.
@@ -59,15 +60,16 @@ where
     ///
     /// This methods builds node instance and returns it.
     fn build<F>(
-        buffers: Vec<BufferInfo>,
-        images: Vec<ImageInfo>,
+        buffers: Vec<BufferInfo<B>>,
+        images: Vec<ImageInfo<B>>,
         frames: usize,
         pools: F,
         device: &mut D,
         aux: &mut T,
     ) -> Self
     where
-        F: FnMut(&mut D, CommandPoolCreateFlags) -> CommandPool<B, Self::Capability>;
+        F: FnMut(&mut D, CommandPoolCreateFlags) -> CommandPool<B, Self::Capability>,
+    ;
 
     /// Record commands for the node and return them as `Submit` object.
     /// `frame`     - index of the frame for which commands are recorded.
@@ -95,8 +97,23 @@ pub struct Barriers<S> {
     pub release: Range<(S, PipelineStage)>,
 }
 
+/// Buffer info.
+pub struct BufferInfo<'a, B: Backend> {
+    /// Id of the buffer.
+    pub id: BufferId,
+
+    /// Barriers required for the buffer.
+    pub barriers: Barriers<buffer::State>,
+
+    /// Size of the buffer.
+    pub size: u64,
+
+    /// Buffers. One per frame.
+    pub buffers: Vec<&'a B::Buffer>,
+}
+
 /// Image info.
-pub struct ImageInfo {
+pub struct ImageInfo<'a, B: Backend> {
     /// Id of the image.
     pub id: ImageId,
 
@@ -105,15 +122,15 @@ pub struct ImageInfo {
 
     /// Layout in which the image is for the node.
     pub layout: image::Layout,
-}
 
-/// Buffer info.
-pub struct BufferInfo {
-    /// Id of the buffer.
-    pub id: BufferId,
+    /// Image kind.
+    pub kind: image::Kind,
 
-    /// Barriers required for the buffer.
-    pub barriers: Barriers<buffer::State>,
+    /// Image format.
+    pub format: Format,
+
+    /// Images. One per frame.
+    pub images: Vec<&'a B::Image>,
 }
 
 /// Convenient enum to hold either `OneShot` command buffer or reference to `MultiShot`.

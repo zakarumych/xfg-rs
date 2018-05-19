@@ -1,19 +1,21 @@
 use chain::{resource::Id, schedule::Schedule, sync::SyncData};
-use hal::{Backend, Device, queue::{QueueFamily, QueueFamilyId, RawCommandQueue, RawSubmission}};
+use hal::{Backend, Device, queue::{QueueFamily, QueueFamilyId, RawCommandQueue, RawSubmission}, image, buffer, format::Format};
 use std::{borrow::Borrow, ops::AddAssign};
 
 use smallvec::SmallVec;
 
 use id::{BufferId, ImageId};
-use node::{Node, wrap::{AnyNode, NodeBuilder}};
+use node::{Node, build::{AnyNode, NodeBuilder}};
 
-pub struct Graph<B: Backend, D, T> {
+pub struct Graph<B: Backend, D, T, U, I> {
     nodes: Vec<Box<AnyNode<B, D, T>>>,
     schedule: Schedule<SyncData<usize, usize>>,
     semaphores: Vec<B::Semaphore>,
+    buffers: Vec<BufferResource<U>>,
+    images: Vec<ImageResource<I>>,
 }
 
-impl<B, D, T> Graph<B, D, T>
+impl<B, D, T, U, I> Graph<B, D, T, U, I>
 where
     B: Backend,
     D: Device<B>,
@@ -107,10 +109,11 @@ where
     }
 }
 
+
 pub struct GraphBuilder<B: Backend, D, T> {
     builders: Vec<NodeBuilder<B, D, T>>,
-    gen_buffer_id: GenId<u32>,
-    gen_image_id: GenId<u32>,
+    buffers: Vec<u64>,
+    images: Vec<(image::Kind, Format)>,
 }
 
 impl<B, D, T> GraphBuilder<B, D, T>
@@ -119,13 +122,15 @@ where
     D: Device<B>,
 {
     /// Allocate new buffer id.
-    pub fn new_buffer_id(&mut self) -> BufferId {
-        BufferId(Id::new(self.gen_buffer_id.next()))
+    pub fn create_buffer(&mut self, size: u64) -> BufferId {
+        self.buffers.push(size);
+        BufferId(Id::new(self.buffers.len() as u32 - 1))
     }
 
     /// Allocate new image id.
-    pub fn new_image_id(&mut self) -> ImageId {
-        ImageId(Id::new(self.gen_image_id.next()))
+    pub fn create_image(&mut self, kind: image::Kind, format: Format) -> ImageId {
+        self.images.push((kind, format));
+        ImageId(Id::new(self.images.len() as u32 - 1))
     }
 
     /// Add node to the graph.
@@ -147,22 +152,29 @@ where
     /// `device`    - `Device<B>` implementation. `B::Device` or wrapper.
     ///
     /// `aux`       - auxiliary data that `Node`s use.
-    pub fn build<F>(
+    pub fn build<F, X, Y, U, I>(
         &self,
         frames: usize,
         families: F,
+        mut buffer: X,
+        mut image: Y,
         device: &mut D,
         aux: &mut T,
-    ) -> Graph<B, D, T>
+    ) -> Graph<B, D, T, U, I>
     where
         F: IntoIterator,
         F::Item: Borrow<B::QueueFamily>,
+        U: Borrow<B::Buffer>,
+        I: Borrow<B::Image>,
+        X: FnMut(u64, buffer::Usage, &mut D, &mut T) -> U,
+        Y: FnMut(image::Kind, Format, image::Usage, &mut D, &mut T) -> I,
     {
         use chain::{build, pass::Pass};
 
         let families = families.into_iter().collect::<Vec<_>>();
         let families = families.iter().map(Borrow::borrow).collect::<Vec<_>>();
 
+        trace!("Schedule nodes execution");
         let mut semaphores = GenId::new();
 
         let passes: Vec<Pass> = self.builders
@@ -179,6 +191,25 @@ where
             },
         );
 
+        trace!("Allocate buffers");
+        let buffers = self.buffers.iter().enumerate().map(|(index, &size)| {
+            let usage = chains.buffers[&Id::new(index as u32)].usage();
+            BufferResource {
+                size,
+                buffers: (0 .. frames).map(|_| buffer(size, usage, device, aux)).collect()
+            }
+        }).collect::<Vec<_>>();
+
+        trace!("Allocate images");
+        let images = self.images.iter().enumerate().map(|(index, &(kind, format))| {
+            let usage = chains.images[&Id::new(index as u32)].usage();
+            ImageResource {
+                kind,
+                format,
+                images: (0 .. frames).map(|_| image(kind, format, usage, device, aux)).collect()
+            }
+        }).collect::<Vec<_>>();
+
         let mut nodes: Vec<Option<Box<AnyNode<B, D, T>>>> =
             (0..self.builders.len()).map(|_| None).collect();
 
@@ -188,6 +219,8 @@ where
                     let node = self.builders[submission.pass().0].build(
                         submission,
                         &chains.images,
+                        &buffers,
+                        &images,
                         frames,
                         find_family::<B, _>(families.iter().cloned(), sid.family()),
                         device,
@@ -204,8 +237,21 @@ where
             semaphores: (0..semaphores.total())
                 .map(|_| device.create_semaphore())
                 .collect(),
+            buffers,
+            images,
         }
     }
+}
+
+pub struct BufferResource<U> {
+    pub size: u64,
+    pub buffers: Vec<U>,
+}
+
+pub struct ImageResource<I> {
+    pub kind: image::Kind,
+    pub format: Format,
+    pub images: Vec<I>,
 }
 
 struct GenId<T> {
@@ -217,7 +263,9 @@ where
     T: Copy + From<u8> + AddAssign,
 {
     fn new() -> Self {
-        Self::default()
+        GenId {
+            next: 0.into(),
+        }
     }
 
     fn next(&mut self) -> T {
@@ -228,15 +276,6 @@ where
 
     fn total(self) -> T {
         self.next
-    }
-}
-
-impl<T> Default for GenId<T>
-where
-    T: From<u8>,
-{
-    fn default() -> Self {
-        GenId { next: 0u8.into() }
     }
 }
 
