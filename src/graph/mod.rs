@@ -107,6 +107,15 @@ where
             }
         }
     }
+
+    /// Dispose of the graph.
+    fn dispose(self, device: &mut D, aux: &mut T) {
+        for node in self.nodes {
+            node.dispose(device, aux);
+        }
+
+        // TODO: Destroy resources.
+    }
 }
 
 

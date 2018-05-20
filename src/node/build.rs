@@ -27,6 +27,8 @@ where
         aux: &'a T,
         extend: &mut SmallVec<[Cow<'a, B::CommandBuffer>; 4]>,
     );
+
+    fn dispose(self: Box<Self>, device: &mut D, aux: &mut T);
 }
 
 impl<B, D, T, N> AnyNode<B, D, T> for (N,)
@@ -50,6 +52,10 @@ where
                 .into_iter()
                 .map(|s| unsafe { s.into_buffer() }),
         )
+    }
+
+    fn dispose(self: Box<Self>, device: &mut D, aux: &mut T) {
+        self.0.dispose(device, aux);
     }
 }
 
@@ -317,16 +323,14 @@ where
             BufferInfo {
                 id,
                 barriers: Barriers {
-                    acquire: {
-                        let Range { ref start, ref end } =
-                            submission.sync().acquire.buffers[&id.0].states;
+                    acquire: submission.sync().acquire.buffers.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
                         (start.access, start.stages)..(end.access, end.stages)
-                    },
-                    release: {
-                        let Range { ref start, ref end } =
-                            submission.sync().release.buffers[&id.0].states;
+                    }),
+                    release: submission.sync().release.buffers.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
                         (start.access, start.stages)..(end.access, end.stages)
-                    },
+                    }),
                 },
                 size: resource.size,
                 buffers: resource.buffers.iter().map(Borrow::borrow).collect(),
@@ -353,18 +357,14 @@ where
             ImageInfo {
                 id,
                 barriers: Barriers {
-                    acquire: {
-                        let Range { ref start, ref end } =
-                            submission.sync().acquire.images[&id.0].states;
-                        ((start.access, start.layout), start.stages)
-                            ..((end.access, end.layout), end.stages)
-                    },
-                    release: {
-                        let Range { ref start, ref end } =
-                            submission.sync().release.images[&id.0].states;
-                        ((start.access, start.layout), start.stages)
-                            ..((end.access, end.layout), end.stages)
-                    },
+                    acquire: submission.sync().acquire.images.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
+                        ((start.access, start.layout), start.stages) .. ((end.access, end.layout), end.stages)
+                    }),
+                    release: submission.sync().release.images.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
+                        ((start.access, start.layout), start.stages) .. ((end.access, end.layout), end.stages)
+                    }),
                 },
                 layout: chains[&id.0].link(submission.image(id.0)).state().layout,
                 kind: resource.kind,

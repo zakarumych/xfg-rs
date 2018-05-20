@@ -2,12 +2,13 @@
 use std::{borrow::Borrow, iter::{empty, Empty}, ops::Range};
 
 use hal::{ Backend, Device, buffer, image, Primitive, 
-    command::{CommandBuffer, Primary, OneShot},
-    format::Format,
+    command::{CommandBuffer, OneShot, MultiShot, Primary, Submit},
+    format::{Format, Swizzle},
+    memory::{Dependencies, Barrier},
     image::Extent,
     queue::Graphics,
     pass::{Attachment, AttachmentOps, AttachmentLoadOp, AttachmentStoreOp, SubpassDesc, Subpass, SubpassDependency},
-    pool::{CommandPool, CommandPoolCreateFlags},
+    pool::{CommandPool, CommandPoolCreateFlags, RawCommandPool},
     pso::{
         Element, ElemStride, VertexBufferDesc, PipelineStage,
         AttributeDesc, InputAssemblerDesc, PrimitiveRestart,
@@ -18,9 +19,10 @@ use hal::{ Backend, Device, buffer, image, Primitive,
     },
 };
 
+use relevant::Relevant;
+
 use smallvec::SmallVec;
 
-use id::{BufferId, ImageId};
 use node::{Node, NodeDesc, Submittables, EitherSubmit, BufferInfo, ImageInfo};
 
 /// Render pass desc.
@@ -71,18 +73,25 @@ pub trait RenderPass<B: Backend, D, T>: RenderPassDesc {
     fn run<I>(&mut self, sampled: I, frame: usize, device: &mut D, aux: &T, &mut CommandBuffer<B, Graphics>)
     where
         I: IntoIterator,
-        I::Item: Borrow<B::Image>,
+        I::Item: Borrow<B::ImageView>,
     ;
+
+    /// Dispose of the pass.
+    fn dispose(self, device: &mut D, aux: &mut T);
 }
 
 struct Resources<B: Backend> {
+    views: Vec<B::ImageView>,
     framebuffer: B::Framebuffer,
     pool: CommandPool<B, Graphics>,
-    individual_reset_pool: CommandPool<B, Graphics>,
+    barriers_pool: CommandPool<B, Graphics>,
+    acquire: Option<Submit<B, Graphics, MultiShot, Primary>>,
+    release: Option<Submit<B, Graphics, MultiShot, Primary>>,
 }
 
 /// Render pass node.
 pub struct RenderPassNode<B: Backend, R> {
+    relevant: Relevant,
     resources: Vec<Resources<B>>,
     render_pass: B::RenderPass,
     pipeline_layout: B::PipelineLayout,
@@ -148,7 +157,7 @@ where
         trace!("Creating RenderPass instance for '{}'", R::name());
         let render_pass: B::RenderPass = {
             let attachments = (0 .. R::colors()).map(|index| Attachment {
-                format: Some(unimplemented!()),
+                format: Some(images[R::sampled() + index].format),
                 ops: AttachmentOps {
                     load: AttachmentLoadOp::Load,
                     store: AttachmentStoreOp::Store,
@@ -161,7 +170,7 @@ where
                 samples: 1,
             }).chain( if R::depth() {
                 Some(Attachment {
-                    format: Some(unimplemented!()),
+                    format: Some(images[R::sampled() + R::colors()].format),
                     ops: AttachmentOps {
                         load: AttachmentLoadOp::Load,
                         store: AttachmentStoreOp::Store,
@@ -223,7 +232,7 @@ where
                 },
                 blender: BlendDesc {
                     logic_op: None,
-                    targets: (0 .. R::colors()).map(|index| ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)).collect(),
+                    targets: (0 .. R::colors()).map(|_| ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)).collect(),
                 },
                 depth_stencil: if R::depth() {
                     Some(DepthStencilDesc {
@@ -251,16 +260,120 @@ where
             result
         };
 
+        let with_acquire = buffers.iter().any(|buffer| buffer.barriers.acquire.is_some());
+        let with_release = buffers.iter().any(|buffer| buffer.barriers.release.is_some());
+
         RenderPassNode {
-            resources: (0 .. frames).map(|_| Resources {
-                framebuffer: device.create_framebuffer(&render_pass, &[], unimplemented!()).unwrap(),
-                pool: pools(device, CommandPoolCreateFlags::empty()),
-                individual_reset_pool: pools(device, CommandPoolCreateFlags::RESET_INDIVIDUAL),
+            resources: (0 .. frames).map(|index| {
+                let mut extent = None;
+                let views = images.iter().enumerate().map(|(i, info)| {
+                    if i >= R::sampled() {
+                        // This is color or depth attachment.
+                        assert!(extent.map_or(true, |e| e == info.kind.extent()), "All attachments must have same `Extent`");
+                        extent = Some(info.kind.extent());
+                    }
+                    device.create_image_view(
+                        info.images[index],
+                        match info.kind {
+                            image::Kind::D1(_, _) => image::ViewKind::D1,
+                            image::Kind::D2(_, _, _, _) => image::ViewKind::D2,
+                            image::Kind::D3(_, _, _) => image::ViewKind::D3,
+                        },
+                        info.format,
+                        Swizzle::NO,
+                        image::SubresourceRange {
+                            aspects: info.format.aspects(),
+                            levels: 0 .. 1,
+                            layers: 0 .. 1,
+                        },
+                    ).unwrap()
+                }).collect::<Vec<_>>();
+
+                let extent = extent.unwrap_or(Extent { width: 0, height: 0, depth: 0 });
+
+
+                let mut barriers_pool = pools(device, CommandPoolCreateFlags::empty());
+
+                let acquire = if with_acquire {
+                    let mut cbuf = barriers_pool.acquire_command_buffer::<MultiShot>(false);
+                    for (barrier, buffer) in buffers.iter().filter_map(|info| info.barriers.acquire.as_ref().map(|barrier| (barrier, info.buffers[index]))) {
+                        cbuf.pipeline_barrier(
+                            barrier.start.1 .. barrier.end.1,
+                            Dependencies::empty(),
+                            Some(Barrier::Buffer {
+                                states: barrier.start.0 .. barrier.end.0,
+                                target: buffer,
+                            })
+                        );
+                    }
+
+                    for (barrier, image, aspects) in images.iter().filter_map(|info| info.barriers.acquire.as_ref().map(|barrier| (barrier, info.images[index], info.format.aspects()))) {
+                        cbuf.pipeline_barrier(
+                            barrier.start.1 .. barrier.end.1,
+                            Dependencies::empty(),
+                            Some(Barrier::Image {
+                                states: barrier.start.0 .. barrier.end.0,
+                                target: image,
+                                range: image::SubresourceRange {
+                                    aspects,
+                                    levels: 0..1,
+                                    layers: 0..1,
+                                }
+                            })
+                        );
+                    }
+                    Some(cbuf.finish())
+                } else {
+                    None
+                };
+
+                let release = if with_release {
+                    let mut cbuf = barriers_pool.acquire_command_buffer::<MultiShot>(false);
+                    for (barrier, buffer) in buffers.iter().filter_map(|info| info.barriers.release.as_ref().map(|barrier| (barrier, info.buffers[index]))) {
+                        cbuf.pipeline_barrier(
+                            barrier.start.1 .. barrier.end.1,
+                            Dependencies::empty(),
+                            Some(Barrier::Buffer {
+                                states: barrier.start.0 .. barrier.end.0,
+                                target: buffer,
+                            })
+                        );
+                    }
+
+                    for (barrier, image, aspects) in images.iter().filter_map(|info| info.barriers.release.as_ref().map(|barrier| (barrier, info.images[index], info.format.aspects()))) {
+                        cbuf.pipeline_barrier(
+                            barrier.start.1 .. barrier.end.1,
+                            Dependencies::empty(),
+                            Some(Barrier::Image {
+                                states: barrier.start.0 .. barrier.end.0,
+                                target: image,
+                                range: image::SubresourceRange {
+                                    aspects,
+                                    levels: 0..1,
+                                    layers: 0..1,
+                                }
+                            })
+                        );
+                    }
+                    Some(cbuf.finish())
+                } else {
+                    None
+                };
+
+                Resources {
+                    framebuffer: device.create_framebuffer(&render_pass, views.iter().skip(R::sampled()), extent).unwrap(),
+                    views,
+                    pool: pools(device, CommandPoolCreateFlags::empty()),
+                    barriers_pool,
+                    acquire,
+                    release,
+                }
             }).collect(),
             render_pass,
             pipeline_layout,
             graphics_pipeline,
             pass: R::build(frames, device, aux),
+            relevant: Relevant,
         }
     }
 
@@ -271,10 +384,36 @@ where
         aux: &'a T,
     ) -> SmallVec<[EitherSubmit<'a, B, Graphics>; 3]>
     {
-        unimplemented!()
+        let ref mut resources = self.resources[frame];
+        let mut cbuf = resources.pool.acquire_command_buffer::<OneShot>(false);
+        self.pass.run(&resources.views[..R::sampled()], frame, device, aux, &mut cbuf);
+        let mut main = Some(cbuf.finish().into());
+
+        let acquire = resources.acquire.as_ref().map(Into::into);
+        let release = resources.release.as_ref().map(Into::into);
+        
+        acquire
+            .into_iter()
+            .chain(main)
+            .chain(release)
+            .collect()
+    }
+
+    fn dispose(self, device: &mut D, aux: &mut T) {
+        self.pass.dispose(device, aux);
+
+        for mut resources in self.resources {
+            drop(resources.acquire);
+            drop(resources.release);
+            resources.barriers_pool.reset();
+            resources.pool.reset();
+            device.destroy_command_pool(resources.barriers_pool.into_raw());
+            device.destroy_command_pool(resources.pool.into_raw());
+        }
+
+        self.relevant.dispose();
     }
 }
-
 
 fn all_graphics_shaders_stages() -> PipelineStage {
     PipelineStage::VERTEX_SHADER |

@@ -86,15 +86,18 @@ where
         device: &mut D,
         aux: &'a T,
     ) -> <Self as Submittables<'a, B, D, T>>::IntoIter;
+
+    /// Dispose of the node.
+    fn dispose(self, device: &mut D, aux: &mut T);
 }
 
 /// Set of barriers for the node to execute.
 pub struct Barriers<S> {
     /// Buffer barriers.
-    pub acquire: Range<(S, PipelineStage)>,
+    pub acquire: Option<Range<(S, PipelineStage)>>,
 
     /// Image barriers.
-    pub release: Range<(S, PipelineStage)>,
+    pub release: Option<Range<(S, PipelineStage)>>,
 }
 
 /// Buffer info.
