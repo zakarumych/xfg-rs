@@ -22,11 +22,9 @@ use gfx_hal::queue::Graphics;
 use gfx_hal::window::{FrameSync, Swapchain, SwapchainConfig};
 use gfx_hal::{Backend, Device, Instance, PhysicalDevice, Surface};
 
-use mem::{Factory, SmartAllocator, Type};
-
 use winit::{EventsLoop, WindowBuilder};
 
-use xfg::{GraphBuilder, Pass, SuperFrame};
+use xfg::*;
 
 #[cfg(feature = "dx12")]
 pub extern crate gfx_backend_dx12 as back;

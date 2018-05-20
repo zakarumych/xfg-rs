@@ -3,7 +3,10 @@
 #![allow(dead_code)]
 
 extern crate smallvec;
+#[macro_use]
+extern crate glsl_layout;
 extern crate xfg_examples;
+
 use xfg_examples::*;
 
 use std::borrow::Borrow;
@@ -22,20 +25,20 @@ use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, D
                    VertexBufferSet, Viewport};
 use gfx_hal::queue::Transfer;
 use gfx_hal::{Backend, Device, IndexType};
+use glsl_layout::*;
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
-use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
-          PassShaders};
+
+use xfg::*;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TrProjView {
-    transform: Matrix4<f32>,
-    view: Matrix4<f32>,
-    projection: Matrix4<f32>,
+    transform: mat4,
+    view: mat4,
+    projection: mat4,
 }
 
-unsafe impl Pod for TrProjView {}
 
 #[derive(Debug)]
 struct DrawFlat;

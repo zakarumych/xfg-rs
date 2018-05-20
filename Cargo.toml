@@ -8,24 +8,20 @@ repository = "https://github.com/omni-viral/xfg-rs"
 
 [dependencies]
 derivative = "1.0"
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "54fe14fbb" }
-gfx-chain = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-chain" }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "d8e5d0cc3" }
+gfx-chain = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-chain", rev = "a6a5421" }
 log = "0.4"
 relevant = "0.1"
 smallvec = "0.4"
 
 [dev-dependencies]
+asset = { version = "0.1.0", git = "https://github.com/omni-viral/asset", rev = "d8d07d1" }
 cgmath = "0.16"
 env_logger = "0.5"
-gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "9125d94e" }
+gfx-render = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-render", rev = "d955162" }
+glsl-layout = "0.1.1"
 winit = "0.11"
 
 [workspace]
 members = ["examples"]
 
-
-[patch.'https://github.com/omni-viral/gfx-chain']
-gfx-chain = { path = "../gfx-chain" }
-
-[patch.'https://github.com/gfx-rs/gfx']
-gfx-hal = { path = "../gfx/src/hal" }
