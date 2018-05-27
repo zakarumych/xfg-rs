@@ -36,7 +36,7 @@ where
     }
 
     fn depth() -> bool {
-        true
+        false
     }
 
     fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)] {
@@ -116,7 +116,12 @@ where
         }
     }
 
-    fn build<I>(_sampled: I, _set: &B::DescriptorSetLayout, _device: &mut Factory<B>, _aux: &mut Scene<B>) -> Self {
+    fn build<I>(
+        _sampled: I,
+        _set: &B::DescriptorSetLayout,
+        _device: &mut Factory<B>,
+        _aux: &mut Scene<B>,
+    ) -> Self {
         DrawFlat {
             pool: XfgDescriptorPool::new(),
         }
@@ -172,11 +177,7 @@ where
             PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER,
             Dependencies::empty(),
             scene.objects.iter().map(|object| Barrier::Buffer {
-                target: unsafe { &*object.cache.get() }
-                    .as_ref()
-                    .unwrap()
-                    .uniforms[0]
-                    .borrow(),
+                target: unsafe { &*object.cache.get() }.as_ref().unwrap().uniforms[0].borrow(),
                 states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
             }),
         );
@@ -377,13 +378,13 @@ where
     builder.build(QueueFamilyId(0), factory).unwrap()
 }
 
-fn graph<B>(kind: image::Kind, surface: ImageId, graph: &mut XfgGraphBuilder<B>)
+fn graph<B>(kind: image::Kind, target: ImageId, graph: &mut XfgGraphBuilder<B>)
 where
     B: Backend,
 {
-    let depth = graph.create_image(kind, Format::D32Float);
+    // let depth = graph.create_image(kind, Format::D32Float);
 
-    graph.add_node(DrawFlat::builder().with_image(surface).with_image(depth));
+    graph.add_node(DrawFlat::builder().with_image(target));
 }
 
 fn fill<B>(scene: &mut Scene<B>, factory: &mut Factory<B>)

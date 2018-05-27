@@ -17,8 +17,8 @@ use hal::{
 use smallvec::SmallVec;
 
 use node::{
-    build::NodeBuilder, low::{AnyNode, AnyNodeBuilder}, Node,
-    present::{PresentNode, PresentBuilder},
+    build::NodeBuilder, low::{AnyNode, AnyNodeBuilder}, present::{PresentBuilder, PresentNode},
+    Node,
 };
 use util::*;
 
@@ -185,10 +185,12 @@ where
         let families = families.iter().map(Borrow::borrow).collect::<Vec<_>>();
 
         let mut builders: Vec<Option<Box<AnyNodeBuilder<B, D, T, U, I> + 'a>>> = self.builders;
-        let present_dependencies: Vec<_> = (0 .. builders.len()).map(PassId).collect();
+        let present_dependencies: Vec<_> = (0..builders.len()).map(PassId).collect();
 
         for present in presents {
-            builders.push(Some(Box::new(present.with_dependencies(present_dependencies.clone()))));
+            builders.push(Some(Box::new(
+                present.with_dependencies(present_dependencies.clone()),
+            )));
         }
 
         trace!("Schedule nodes execution");
@@ -214,7 +216,7 @@ where
             .iter()
             .enumerate()
             .map(|(index, &size)| {
-                let usage = chains.buffers[&Id::new(index as u32)].usage();
+                let usage = chains.buffers.get(&Id::new(index as u32)).map_or(buffer::Usage::empty(), |chain| chain.usage());
                 BufferResource {
                     size,
                     buffer: buffer(size, usage, device, aux),
@@ -228,7 +230,7 @@ where
             .iter()
             .enumerate()
             .map(|(index, &(kind, format))| {
-                let usage = chains.images[&Id::new(index as u32)].usage();
+                let usage = chains.images.get(&Id::new(index as u32)).map_or(image::Usage::empty(), |chain| chain.usage());
                 ImageResource {
                     kind,
                     format,

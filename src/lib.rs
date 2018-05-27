@@ -15,5 +15,5 @@ mod node;
 mod util;
 
 pub use graph::{Graph, GraphBuilder};
-pub use util::{Barriers, BufferInfo, ImageInfo, BufferResource, ImageResource, BufferId, ImageId};
-pub use node::{Node, NodeDesc, build::NodeBuilder, render, present};
+pub use node::{build::NodeBuilder, present, render, Node, NodeDesc};
+pub use util::{Barriers, BufferId, BufferInfo, BufferResource, ImageId, ImageInfo, ImageResource};

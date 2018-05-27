@@ -253,7 +253,6 @@ where
             &mut factory,
             &mut scene,
             |surface, families, factory, scene| -> Result<_, ::std::io::Error> {
-
                 let (capabilites, formats) = factory.capabilities_and_formats(&surface);
                 let surface_format = formats.map_or(Format::Rgba8Srgb, |formats| {
                     info!("Surface formats: {:#?}", formats);
@@ -275,20 +274,24 @@ where
                     aspect: (extent.width as f32) / (extent.height as f32),
                     near: 0.1,
                     far: 2000.0,
-                }.into(); 
+                }.into();
 
                 let kind = image::Kind::D2(extent.width.into(), extent.height.into(), 1, 1);
 
                 let mut builder = GraphBuilder::new();
                 let surface_id = builder.create_image(kind, surface_format);
-                graph(kind, surface_id, &mut builder);                
+                graph(kind, surface_id, &mut builder);
 
                 Ok(builder
                     .build(
                         families,
                         create_buffer,
                         create_image,
-                        Some(present::PresentBuilder::new(surface_id, surface_format, surface)),
+                        Some(present::PresentBuilder::new(
+                            surface_id,
+                            surface_format,
+                            surface,
+                        )),
                         factory,
                         scene,
                     )
