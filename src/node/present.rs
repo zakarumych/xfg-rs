@@ -138,7 +138,7 @@ where
                             PipelineStage::TRANSFER .. PipelineStage::TOP_OF_PIPE,
                             Dependencies::empty(),
                             Some(Barrier::Image {
-                                states: (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal) .. (image::Access::empty(), image::Layout::Present),
+                                states: (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal) .. (image::Access::all(), image::Layout::Present),
                                 target: &images[index],
                                 range: image::SubresourceRange {
                                     aspects: self.format.aspects(),
