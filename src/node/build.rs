@@ -1,183 +1,37 @@
-use std::{borrow::{Borrow, Cow}, cmp::Ordering, marker::PhantomData, ops::Range};
+use std::{borrow::Borrow, cmp::Ordering, marker::PhantomData, ops::Range};
 
-use hal::{buffer, image, Backend, Device,
-          command::Submittable,
-          pool::{CommandPool, CommandPoolCreateFlags}, pso::PipelineStage,
-          queue::{Capability, QueueFamily, QueueFamilyId, QueueType}};
+use hal::{
+    buffer, format::Format, image, pool::{CommandPool, CommandPoolCreateFlags}, pso::PipelineStage,
+    queue::{Capability, CommandQueue, QueueFamily, QueueFamilyId, QueueType}, window::Backbuffer,
+    Backend, Device,
+};
 
-use chain::{chain::ImageChains, pass::{Pass, PassId, StateUsage},
-            resource::{Buffer, BufferLayout, Image, State}, schedule::Submission, sync::SyncData};
+use chain::{
+    chain::{BufferChains, ImageChains}, pass::{Pass, PassId, StateUsage},
+    resource::{Buffer, BufferLayout, Image, State}, schedule::Submission, sync::SyncData,
+};
 
-use smallvec::SmallVec;
+use node::{low::*, Barriers, BufferInfo, ImageInfo, Node, NodeDesc};
+use util::*;
 
-use id::{BufferId, ImageId};
-use node::{Barriers, BufferInfo, ImageInfo, Node, NodeDesc};
-use graph::{BufferResource, ImageResource};
-
-pub trait AnyNode<B, D, T>: Send + Sync
-where
-    B: Backend,
-{
-    fn name(&self) -> &'static str;
-
-    fn run<'a>(
-        &'a mut self,
-        frame: usize,
-        device: &mut D,
-        aux: &'a T,
-        extend: &mut SmallVec<[Cow<'a, B::CommandBuffer>; 4]>,
-    );
-
-    fn dispose(self: Box<Self>, device: &mut D, aux: &mut T);
-}
-
-impl<B, D, T, N> AnyNode<B, D, T> for (N,)
-where
-    B: Backend,
-    N: Node<B, D, T>,
-{
-    fn name(&self) -> &'static str {
-        N::name()
-    }
-
-    fn run<'a>(
-        &'a mut self,
-        frame: usize,
-        device: &mut D,
-        aux: &'a T,
-        extend: &mut SmallVec<[Cow<'a, B::CommandBuffer>; 4]>,
-    ) {
-        extend.extend(
-            N::run(&mut self.0, frame, device, aux)
-                .into_iter()
-                .map(|s| unsafe { s.into_buffer() }),
-        )
-    }
-
-    fn dispose(self: Box<Self>, device: &mut D, aux: &mut T) {
-        self.0.dispose(device, aux);
-    }
-}
-
-trait AnyDesc<B>: Send + Sync
-where
-    B: Backend,
-{
-    fn name(&self) -> &str;
-
-    fn chain(
-        &self,
-        id: PassId,
-        families: &[&B::QueueFamily],
-        buffers: &[BufferId],
-        images: &[ImageId],
-        dependencies: Vec<PassId>,
-    ) -> Pass;
-}
-
-trait AnyNodeBuilder<B, D, T>: AnyDesc<B>
-where
-    B: Backend,
-{
-    fn build(
-        &self,
-        buffers: Vec<BufferInfo<B>>,
-        images: Vec<ImageInfo<B>>,
-        frames: usize,
-        family: &B::QueueFamily,
-        device: &mut D,
-        aux: &mut T,
-    ) -> Box<AnyNode<B, D, T>>;
-}
-
-impl<B, N> AnyDesc<B> for PhantomData<N>
-where
-    B: Backend,
-    N: NodeDesc,
-{
-    fn name(&self) -> &str {
-        N::name()
-    }
-
-    fn chain(
-        &self,
-        id: PassId,
-        families: &[&B::QueueFamily],
-        buffers: &[BufferId],
-        images: &[ImageId],
-        dependencies: Vec<PassId>,
-    ) -> Pass {
-        let pass = Pass {
-            id,
-            family: pick_queue_family::<B, N::Capability, _>(families.iter().cloned()),
-            queue: None,
-            dependencies,
-            buffers: buffers
-                .iter()
-                .map(|id| id.0)
-                .zip(N::buffers().into_iter().map(buffer_state_usage))
-                .collect(),
-            images: images
-                .iter()
-                .map(|id| id.0)
-                .zip(N::images().into_iter().map(image_state_usage))
-                .collect(),
-        };
-        assert_eq!(pass.buffers.len(), buffers.len());
-        assert_eq!(pass.images.len(), images.len());
-        pass
-    }
-}
-
-impl<B, D, T, N> AnyNodeBuilder<B, D, T> for PhantomData<N>
-where
-    B: Backend,
-    D: Device<B>,
-    N: Node<B, D, T>,
-{
-    fn build(
-        &self,
-        buffers: Vec<BufferInfo<B>>,
-        images: Vec<ImageInfo<B>>,
-        frames: usize,
-        family: &B::QueueFamily,
-        device: &mut D,
-        aux: &mut T,
-    ) -> Box<AnyNode<B, D, T>> {
-        let node = N::build(
-            buffers,
-            images,
-            frames,
-            |device, flags| create_typed_pool(family, flags, device),
-            device,
-            aux,
-        );
-        Box::new((node,))
-    }
-}
-
-pub struct NodeBuilder<B: Backend, D, T> {
-    builder: Box<AnyNodeBuilder<B, D, T>>,
+pub struct NodeBuilder<N> {
     buffers: Vec<BufferId>,
     images: Vec<ImageId>,
     dependencies: Vec<PassId>,
+    _pd: PhantomData<N>,
 }
 
-impl<B, D, T> NodeBuilder<B, D, T>
+impl<N> NodeBuilder<N>
 where
-    B: Backend,
-    D: Device<B>,
+    N: NodeDesc,
 {
     /// Create `NodeBuilder` that builds node of type `N`.
-    pub fn new<N>() -> Self
-    where
-        N: Node<B, D, T>,
-    {
+    pub fn new() -> Self {
         NodeBuilder {
-            builder: Box::new(PhantomData::<N>),
             buffers: Vec::new(),
             images: Vec::new(),
             dependencies: Vec::new(),
+            _pd: PhantomData,
         }
     }
 
@@ -208,40 +62,63 @@ where
         self.add_image(id);
         self
     }
+}
 
-    pub(crate) fn chain(&self, index: usize, families: &[&B::QueueFamily]) -> Pass {
-        self.builder.chain(
-            PassId(index),
-            families,
-            &self.buffers,
-            &self.images,
-            self.dependencies.clone(),
-        )
+impl<B, D, T, U, I, N> AnyNodeBuilder<B, D, T, U, I> for NodeBuilder<N>
+where
+    B: Backend,
+    D: Device<B>,
+    N: Node<B, D, T>,
+    I: Borrow<B::Image>,
+    U: Borrow<B::Buffer>,
+{
+    fn name(&self) -> &str {
+        N::name()
     }
 
-    pub(crate) fn build<S, W, U, I>(
-        &self,
-        submission: &Submission<SyncData<S, W>>,
-        image_chains: &ImageChains,
+    fn pass(&self, id: PassId, families: &[&B::QueueFamily]) -> Pass {
+        let pass = Pass {
+            id,
+            family: pick_queue_family::<B, N::Capability, _>(families.iter().cloned()),
+            queue: None,
+            dependencies: self.dependencies.clone(),
+            buffers: self
+                .buffers
+                .iter()
+                .map(|id| id.0)
+                .zip(N::buffers().into_iter().map(buffer_state_usage))
+                .collect(),
+            images: self
+                .images
+                .iter()
+                .map(|id| id.0)
+                .zip(N::images().into_iter().map(image_state_usage))
+                .collect(),
+        };
+        assert_eq!(pass.buffers.len(), self.buffers.len());
+        assert_eq!(pass.images.len(), self.images.len());
+        pass
+    }
+
+    fn build(
+        self: Box<Self>,
+        submission: &Submission<SyncData<usize, usize>>,
+        _buffer_chains: &BufferChains,
         buffers: &[BufferResource<U>],
+        image_chains: &ImageChains,
         images: &[ImageResource<I>],
-        frames: usize,
         family: &B::QueueFamily,
         device: &mut D,
         aux: &mut T,
-    ) -> Box<AnyNode<B, D, T>>
-    where
-        U: Borrow<B::Buffer>,
-        I: Borrow<B::Image>,
-    {
-        let buffers = buffer_info(self.buffers.iter().cloned(), buffers, submission);
-        let images = image_info(self.images.iter().cloned(), images, image_chains, submission);
+    ) -> Box<AnyNode<B, D, T>> {
+        let buffer_info = buffer_info(&self.buffers, &*buffers, submission);
+        let image_info = image_info(&self.images, &*images, image_chains, submission);
 
-        self.builder
-            .build(buffers, images, frames, family, device, aux)
+        let pools = |device: &mut _, flags| create_typed_pool(family, flags, device);
+        let node = N::build(buffer_info, image_info, pools, device, aux);
+        Box::new((node,))
     }
 }
-
 
 fn create_typed_pool<B, D, C>(
     family: &B::QueueFamily,
@@ -310,67 +187,54 @@ where
         .id()
 }
 
-fn buffer_info<'a, B, T, U, S, W>(buffers: T, resources: &'a [BufferResource<U>], submission: &Submission<SyncData<S, W>>) -> Vec<BufferInfo<'a, B>>
-where
-    B: Backend,
-    T: Iterator<Item = BufferId>,
-    U: Borrow<B::Buffer>,
-{
+fn buffer_info<'a, U, S, W>(
+    buffers: &[BufferId],
+    resources: &'a [BufferResource<U>],
+    submission: &Submission<SyncData<S, W>>,
+) -> Vec<BufferInfo<'a, U>> {
     buffers
-        .map(|id| {
-            let ref resource = resources[id.0.index() as usize];
-
-            BufferInfo {
-                id,
-                barriers: Barriers {
-                    acquire: submission.sync().acquire.buffers.get(&id.0).map(|barrier| {
-                        let Range { ref start, ref end } = barrier.states;
-                        (start.access, start.stages)..(end.access, end.stages)
-                    }),
-                    release: submission.sync().release.buffers.get(&id.0).map(|barrier| {
-                        let Range { ref start, ref end } = barrier.states;
-                        (start.access, start.stages)..(end.access, end.stages)
-                    }),
-                },
-                size: resource.size,
-                buffers: resource.buffers.iter().map(Borrow::borrow).collect(),
-            }
+        .iter()
+        .map(|&id| BufferInfo {
+            id,
+            barriers: Barriers {
+                acquire: submission.sync().acquire.buffers.get(&id.0).map(|barrier| {
+                    let Range { ref start, ref end } = barrier.states;
+                    (start.access, start.stages)..(end.access, end.stages)
+                }),
+                release: submission.sync().release.buffers.get(&id.0).map(|barrier| {
+                    let Range { ref start, ref end } = barrier.states;
+                    (start.access, start.stages)..(end.access, end.stages)
+                }),
+            },
+            resource: &resources[id.0.index() as usize],
         })
         .collect()
 }
 
-fn image_info<'a, B, T, I, S, W>(
-    images: T,
+fn image_info<'a, I, S, W>(
+    images: &[ImageId],
     resources: &'a [ImageResource<I>],
     chains: &ImageChains,
     submission: &Submission<SyncData<S, W>>,
-) -> Vec<ImageInfo<'a, B>>
-where
-    B: Backend,
-    T: Iterator<Item = ImageId>,
-    I: Borrow<B::Image>,
-{
+) -> Vec<ImageInfo<'a, I>> {
     images
-        .map(|id| {
-            let ref resource = resources[id.0.index() as usize];
-
-            ImageInfo {
-                id,
-                barriers: Barriers {
-                    acquire: submission.sync().acquire.images.get(&id.0).map(|barrier| {
-                        let Range { ref start, ref end } = barrier.states;
-                        ((start.access, start.layout), start.stages) .. ((end.access, end.layout), end.stages)
-                    }),
-                    release: submission.sync().release.images.get(&id.0).map(|barrier| {
-                        let Range { ref start, ref end } = barrier.states;
-                        ((start.access, start.layout), start.stages) .. ((end.access, end.layout), end.stages)
-                    }),
-                },
-                layout: chains[&id.0].link(submission.image(id.0)).state().layout,
-                kind: resource.kind,
-                format: resource.format,
-                images: resource.images.iter().map(Borrow::borrow).collect(),
-            }
+        .iter()
+        .map(|&id| ImageInfo {
+            id,
+            barriers: Barriers {
+                acquire: submission.sync().acquire.images.get(&id.0).map(|barrier| {
+                    let Range { ref start, ref end } = barrier.states;
+                    ((start.access, start.layout), start.stages)
+                        ..((end.access, end.layout), end.stages)
+                }),
+                release: submission.sync().release.images.get(&id.0).map(|barrier| {
+                    let Range { ref start, ref end } = barrier.states;
+                    ((start.access, start.layout), start.stages)
+                        ..((end.access, end.layout), end.stages)
+                }),
+            },
+            layout: chains[&id.0].link(submission.image(id.0)).state().layout,
+            resource: &resources[id.0.index() as usize],
         })
         .collect()
 }

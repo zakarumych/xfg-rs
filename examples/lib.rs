@@ -1,0 +1,380 @@
+pub extern crate cgmath;
+pub extern crate gfx_hal as hal;
+pub extern crate gfx_mesh as mesh;
+pub extern crate gfx_render as gfx;
+pub extern crate xfg;
+
+#[macro_use]
+extern crate glsl_layout;
+
+extern crate env_logger;
+#[macro_use]
+extern crate log;
+extern crate winit;
+
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as backend;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate gfx_backend_empty as backend;
+#[cfg(feature = "metal")]
+extern crate gfx_backend_metal as backend;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as backend;
+
+type Back = backend::Backend;
+
+use std::{
+    borrow::{Borrow, Cow}, cell::UnsafeCell, collections::HashMap, sync::Arc,
+    time::{Duration, Instant},
+};
+
+use cgmath::{Deg, Matrix4, PerspectiveFov, SquareMatrix, Transform};
+
+use gfx::{BackendEx, Buffer, Factory, Image, Render, Renderer};
+use glsl_layout::*;
+
+use hal::{
+    buffer, command::{CommandBuffer, Primary, RenderPassInlineEncoder}, device::WaitFor,
+    format::{ChannelType, Format}, image, image::{Extent, StorageFlags, Tiling},
+    memory::{cast_slice, Barrier, Dependencies, Pod, Properties},
+    pool::{CommandPool, CommandPoolCreateFlags},
+    pso::{
+        AllocationError, Descriptor, DescriptorPool, DescriptorRangeDesc,
+        DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, ElemStride, Element,
+        EntryPoint, GraphicsShaderSet, PipelineStage, Rect, ShaderStageFlags, VertexBufferSet,
+        Viewport,
+    },
+    queue::{Graphics, QueueFamilyId},
+    window::{Backbuffer, Extent2D, Frame, FrameSync, Swapchain, SwapchainConfig}, Backend, Device,
+    Instance, PhysicalDevice, Surface,
+};
+
+use mesh::{AsVertexFormat, Mesh, MeshBuilder, PosColor};
+
+use winit::{EventsLoop, WindowBuilder};
+
+use xfg::render::*;
+use xfg::*;
+
+/// Descriptor pool that caches set allocations.
+#[derive(Debug)]
+pub struct XfgDescriptorPool<B: Backend> {
+    pools: Vec<B::DescriptorPool>,
+    sets: Vec<B::DescriptorSet>,
+}
+
+impl<B> XfgDescriptorPool<B>
+where
+    B: Backend,
+{
+    /// Create empty pool.
+    pub fn new() -> Self {
+        XfgDescriptorPool {
+            pools: Vec::new(),
+            sets: Vec::new(),
+        }
+    }
+
+    /// Allocate descriptor set for the render pass.
+    pub fn allocate<R, D>(
+        &mut self,
+        device: &mut D,
+        layout: &B::DescriptorSetLayout,
+    ) -> B::DescriptorSet
+    where
+        R: RenderPassDesc,
+        D: Device<B>,
+    {
+        let ref mut pools = self.pools;
+        let exp = pools.len() as u32;
+
+        self.sets.pop().unwrap_or_else(|| {
+            pools
+                .last_mut()
+                .and_then(|pool| match pool.allocate_set(layout) {
+                    Ok(set) => Some(set),
+                    Err(AllocationError::OutOfPoolMemory) => None,
+                    Err(AllocationError::FragmentedPool)
+                    | Err(AllocationError::IncompatibleLayout) => unreachable!(),
+                    Err(err) => panic!("Unhandled error in XfgDescriptorPool: {}", err),
+                })
+                .unwrap_or_else(|| {
+                    let multiplier = R::bindings().1.pow(exp);
+                    let mut pool = device.create_descriptor_pool(
+                        multiplier,
+                        bindings_to_range(multiplier, R::bindings().0),
+                    );
+
+                    let set = match pool.allocate_set(layout) {
+                        Ok(set) => set,
+                        Err(AllocationError::OutOfPoolMemory)
+                        | Err(AllocationError::FragmentedPool)
+                        | Err(AllocationError::IncompatibleLayout) => unreachable!(),
+                        Err(err) => panic!("Unhandled error in XfgDescriptorPool: {}", err),
+                    };
+
+                    pools.push(pool);
+                    set
+                })
+        })
+    }
+
+    /// Free descriptor set.
+    pub fn free(&mut self, set: B::DescriptorSet) {
+        self.sets.push(set)
+    }
+}
+
+pub struct Cache<B: Backend> {
+    pub uniforms: Vec<Buffer<B>>,
+    pub views: Vec<B::ImageView>,
+    pub set: B::DescriptorSet,
+}
+
+pub struct Object<B: Backend, T = ()> {
+    pub mesh: Arc<Mesh<B>>,
+    pub transform: Matrix4<f32>,
+    pub data: T,
+    pub cache: UnsafeCell<Option<Cache<B>>>,
+}
+
+pub struct Light<B: Backend> {
+    pub color: [f32; 3],
+    pub transform: Matrix4<f32>,
+    pub cache: UnsafeCell<Option<Cache<B>>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AmbientLight(pub [f32; 3]);
+
+pub struct Camera {
+    pub transform: Matrix4<f32>,
+    pub projection: Matrix4<f32>,
+}
+
+pub struct Scene<B: Backend, T = ()> {
+    pub camera: Camera,
+    pub ambient: AmbientLight,
+    pub lights: Vec<Light<B>>,
+    pub objects: Vec<Object<B, T>>,
+}
+
+type XfgGraphBuilder<B, T = ()> = GraphBuilder<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>;
+
+struct XfgGraph<B: Backend, T = ()>(Graph<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>);
+
+impl<B, T> From<Graph<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>> for XfgGraph<B, T>
+where
+    B: Backend,
+{
+    fn from(graph: Graph<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>) -> Self {
+        XfgGraph(graph)
+    }
+}
+
+impl<B, T> Render<B, Scene<B, T>> for XfgGraph<B, T>
+where
+    B: Backend,
+{
+    fn run(
+        &mut self,
+        fences: &mut Vec<B::Fence>,
+        families: &mut HashMap<QueueFamilyId, Vec<B::CommandQueue>>,
+        factory: &mut Factory<B>,
+        scene: &mut Scene<B, T>,
+    ) -> usize {
+        self.0.run(families, factory, scene, fences)
+    }
+
+    fn dispose(self, factory: &mut Factory<B>, scene: &mut Scene<B, T>) -> Backbuffer<B> {
+        Graph::dispose(self.0, factory, scene);
+        unimplemented!()
+    }
+}
+
+#[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
+pub fn run<G, F, T>(_: G, _: F)
+where
+    G: FnOnce(image::Kind, ImageId, &mut XfgGraphBuilder<Back>),
+    F: FnOnce(&mut Scene<Back, T>, &mut Factory<Back>),
+{
+    env_logger::init();
+    error!(
+        "You need to enable the native API feature (vulkan/metal/dx12/gl) in order to run example"
+    );
+}
+
+#[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
+#[deny(dead_code)]
+pub fn run<G, F, T: 'static>(graph: G, fill: F)
+where
+    G: FnOnce(image::Kind, ImageId, &mut XfgGraphBuilder<Back, T>),
+    F: FnOnce(&mut Scene<Back, T>, &mut Factory<Back>),
+{
+    use std::iter::once;
+
+    env_logger::init();
+    let mut events_loop = EventsLoop::new();
+
+    let wb = WindowBuilder::new()
+        .with_dimensions(960, 640)
+        .with_title("flat".to_string());
+
+    let window = wb.build(&events_loop).unwrap();
+
+    events_loop.poll_events(|_| ());
+
+    let (mut factory, mut render) = gfx::init::<Back, XfgGraph<Back, T>, _>(|families| {
+        families.iter().map(|family| (family, 1)).collect()
+    }).unwrap();
+    info!("Device features: {:#?}", factory.features());
+    info!("Device limits: {:#?}", factory.limits());
+
+    let target = render.add_target(&window, &mut factory);
+
+    events_loop.poll_events(|_| ());
+
+    let mut scene = Scene {
+        objects: Vec::new(),
+        ambient: AmbientLight([0.0, 0.0, 0.0]),
+        lights: Vec::new(),
+        camera: Camera {
+            transform: Matrix4::identity(),
+            projection: Matrix4::identity(),
+        },
+    };
+
+    // fill scene
+    fill(&mut scene, &mut factory);
+
+    render
+        .set_render(
+            target,
+            &mut factory,
+            &mut scene,
+            |surface, families, factory, scene| -> Result<_, ::std::io::Error> {
+
+                let (capabilites, formats) = factory.capabilities_and_formats(&surface);
+                let surface_format = formats.map_or(Format::Rgba8Srgb, |formats| {
+                    info!("Surface formats: {:#?}", formats);
+                    formats
+                        .iter()
+                        .find(|&format| format.base_format().1 == ChannelType::Srgb)
+                        .cloned()
+                        .unwrap_or(formats[0])
+                });
+                info!("Chosen surface format: {:#?}", surface_format);
+
+                let extent = capabilites.current_extent.unwrap_or(Extent2D {
+                    width: 960,
+                    height: 640,
+                });
+
+                scene.camera.projection = PerspectiveFov {
+                    fovy: Deg(60.0).into(),
+                    aspect: (extent.width as f32) / (extent.height as f32),
+                    near: 0.1,
+                    far: 2000.0,
+                }.into(); 
+
+                let kind = image::Kind::D2(extent.width.into(), extent.height.into(), 1, 1);
+
+                let mut builder = GraphBuilder::new();
+                let surface_id = builder.create_image(kind, surface_format);
+                graph(kind, surface_id, &mut builder);                
+
+                Ok(builder
+                    .build(
+                        families,
+                        create_buffer,
+                        create_image,
+                        Some(present::PresentBuilder::new(surface_id, surface_format, surface)),
+                        factory,
+                        scene,
+                    )
+                    .into())
+            },
+        )
+        .unwrap();
+
+    let start = Instant::now();
+    let mut total = 0;
+    let total = loop {
+        // Render
+        render.run(&mut factory, &mut scene);
+
+        total += 1;
+        if Instant::now() - start > Duration::from_secs(1) {
+            break total;
+        }
+    };
+
+    let end = Instant::now();
+    let dur = end - start;
+    let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 10e9);
+    info!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
+    info!("Total frames rendered: {}", total);
+    info!("Average FPS: {}", fps);
+
+    // // TODO: Dispose everything properly.
+    ::std::process::exit(0);
+    // is_send_sync::<back::Device>();
+}
+
+fn bindings_to_range(
+    multiplier: usize,
+    bindings: &[DescriptorSetLayoutBinding],
+) -> Vec<DescriptorRangeDesc> {
+    let mut ranges = Vec::new();
+
+    for binding in bindings {
+        let index = binding.ty as usize;
+        while ranges.len() <= index {
+            ranges.push(DescriptorRangeDesc {
+                ty: DescriptorType::Sampler,
+                count: 0,
+            });
+        }
+
+        let ref mut range = ranges[index];
+        range.ty = binding.ty;
+        range.count += binding.count * multiplier;
+    }
+
+    ranges
+}
+
+fn create_image<B, T>(
+    kind: image::Kind,
+    format: Format,
+    usage: image::Usage,
+    factory: &mut Factory<B>,
+    _: &mut Scene<B, T>,
+) -> Image<B>
+where
+    B: Backend,
+{
+    factory
+        .create_image(
+            kind,
+            1,
+            format,
+            image::Tiling::Optimal,
+            Properties::DEVICE_LOCAL,
+            usage,
+            image::StorageFlags::empty(),
+        )
+        .unwrap()
+}
+
+fn create_buffer<B, T>(
+    _: u64,
+    _: buffer::Usage,
+    _: &mut Factory<B>,
+    _: &mut Scene<B, T>,
+) -> Buffer<B>
+where
+    B: Backend,
+{
+    unimplemented!()
+}

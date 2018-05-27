@@ -6,8 +6,12 @@ description = "eXtensible FrameGraph for `gfx_hal`"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/omni-viral/xfg-rs"
 
+[features]
+metal = ["gfx-render/gfx-backend-metal"]
+
 [dependencies]
-derivative = "1.0"
+#derivative = "1.0"
+either = { version = "1.5", features = ["serde"] }
 gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "d8e5d0cc3" }
 gfx-chain = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-chain", rev = "a6a5421" }
 log = "0.4"
@@ -15,13 +19,21 @@ relevant = "0.1"
 smallvec = "0.4"
 
 [dev-dependencies]
-asset = { version = "0.1.0", git = "https://github.com/omni-viral/asset", rev = "d8d07d1" }
+asset = { version = "0.1.0", git = "https://github.com/omni-viral/asset", rev = "d8d07d1", features = ["mesh", "texture", "fs", "obj"] }
 cgmath = "0.16"
 env_logger = "0.5"
+genmesh = "0.5.0"
+gfx-mesh = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-mesh", rev = "1788fe3" }
 gfx-render = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-render", rev = "d955162" }
-glsl-layout = "0.1.1"
-winit = "0.11"
+glsl-layout = { version = "0.1.1", features = ["cgmath", "gfx"] }
+winit = "0.13"
+gfx-backend-empty = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "d8e5d0cc3" }
 
-[workspace]
-members = ["examples"]
+[target.'cfg(not(target_os = "macos"))'.dev-dependencies]
+gfx-backend-vulkan = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "d8e5d0cc3" }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gfx-backend-metal = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "d8e5d0cc3" }
+
+[target.'cfg(windows)'.dev-dependencies]
+gfx-backend-dx12 = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "d8e5d0cc3" }

@@ -14,20 +14,24 @@ use std::sync::Arc;
 use cgmath::{EuclideanSpace, Matrix4, Point3, Transform};
 
 use gfx_hal::buffer::{IndexBufferView, Usage};
-use gfx_hal::command::{ClearColor, ClearDepthStencil, CommandBuffer, Primary,
-                       RenderPassInlineEncoder};
+use gfx_hal::command::{
+    ClearColor, ClearDepthStencil, CommandBuffer, Primary, RenderPassInlineEncoder,
+};
 use gfx_hal::device::ShaderError;
 use gfx_hal::format::Format;
 use gfx_hal::memory::{cast_slice, Pod};
-use gfx_hal::pso::{Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType,
-                   ElemStride, Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags,
-                   VertexBufferSet, Viewport};
+use gfx_hal::pso::{
+    Descriptor, DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, ElemStride,
+    Element, EntryPoint, GraphicsShaderSet, ShaderStageFlags, VertexBufferSet, Viewport,
+};
 use gfx_hal::queue::Transfer;
 use gfx_hal::{Backend, Device, IndexType};
 use mem::{Block, Factory, SmartAllocator};
 use smallvec::SmallVec;
-use xfg::{ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
-          PassShaders};
+use xfg::{
+    ColorAttachment, DepthStencilAttachment, DescriptorPool, GraphBuilder, Pass, PassDesc,
+    PassShaders,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -121,21 +125,19 @@ impl PassDesc for DrawPbm {
     }
 
     fn vertices(&self) -> &[(&[Element<Format>], ElemStride)] {
-        &[
-            (
-                &[
-                    Element {
-                        format: Format::Rgb32Float,
-                        offset: 0,
-                    },
-                    Element {
-                        format: Format::Rgb32Float,
-                        offset: 12,
-                    },
-                ],
-                24,
-            ),
-        ]
+        &[(
+            &[
+                Element {
+                    format: Format::Rgb32Float,
+                    offset: 0,
+                },
+                Element {
+                    format: Format::Rgb32Float,
+                    offset: 12,
+                },
+            ],
+            24,
+        )]
     }
 
     fn bindings(&self) -> &[DescriptorSetLayoutBinding] {

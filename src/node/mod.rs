@@ -1,13 +1,17 @@
-use std::{borrow::Cow, ops::Range};
+use std::{borrow::Borrow, ops::Range};
 
-use hal::{buffer, image, Backend,
-          command::{Level, MultiShot, OneShot, Primary, Submit, Submittable},
-          format::Format,
-          pool::{CommandPool, CommandPoolCreateFlags}, pso::PipelineStage, queue::Capability};
+use hal::{
+    buffer, format::Format, image, pool::{CommandPool, CommandPoolCreateFlags}, pso::PipelineStage,
+    queue::{Capability, CommandQueue}, window::Backbuffer, Backend, Device,
+};
 
-use id::{BufferId, ImageId};
+use self::build::NodeBuilder;
+use util::*;
 
 pub mod build;
+pub mod low;
+pub mod render;
+pub mod present;
 
 /// Overall description for node.
 pub trait NodeDesc: Send + Sync + Sized + 'static {
@@ -30,17 +34,17 @@ pub trait NodeDesc: Send + Sync + Sized + 'static {
     fn images() -> Self::Images;
 }
 
-/// With this trait `Node` implementation defines type of iterator of submittables `Node::run` returns.
-pub trait Submittables<'a, B: Backend, D, T>: NodeDesc {
-    type Submittable: Submittable<'a, B, Self::Capability, Primary>;
-    type IntoIter: IntoIterator<Item = Self::Submittable>;
-}
-
 /// Graph node - building block of the graph
-pub trait Node<B, D, T>: NodeDesc + for<'a> Submittables<'a, B, D, T>
+pub trait Node<B, D, T>: NodeDesc
 where
     B: Backend,
+    D: Device<B>,
 {
+    /// Create `NodeBuilder` for this node.
+    fn builder() -> NodeBuilder<Self> {
+        NodeBuilder::new()
+    }
+
     /// Build node.
     ///
     /// # Parameters
@@ -59,17 +63,17 @@ where
     /// `pools`     - function to allocate command pools compatible with queue assigned to the node.
     ///
     /// This methods builds node instance and returns it.
-    fn build<F>(
-        buffers: Vec<BufferInfo<B>>,
-        images: Vec<ImageInfo<B>>,
-        frames: usize,
+    fn build<F, U, I>(
+        buffers: Vec<BufferInfo<U>>,
+        images: Vec<ImageInfo<I>>,
         pools: F,
         device: &mut D,
         aux: &mut T,
     ) -> Self
     where
         F: FnMut(&mut D, CommandPoolCreateFlags) -> CommandPool<B, Self::Capability>,
-    ;
+        U: Borrow<B::Buffer>,
+        I: Borrow<B::Image>;
 
     /// Record commands for the node and return them as `Submit` object.
     /// `frame`     - index of the frame for which commands are recorded.
@@ -80,99 +84,18 @@ where
     /// `aux`       - auxiliary data container. May be anything the implementation desires.
     ///
     /// This method returns iterator of submittables with primary level and capabilities declared by node.
-    fn run<'a>(
+    fn run<'a, W, S>(
         &'a mut self,
-        frame: usize,
+        wait: W,
+        queue: &mut CommandQueue<B, Self::Capability>,
+        signal: S,
+        fence: Option<&B::Fence>,
         device: &mut D,
         aux: &'a T,
-    ) -> <Self as Submittables<'a, B, D, T>>::IntoIter;
+    ) where
+        W: IntoIterator<Item = (&'a B::Semaphore, PipelineStage)>,
+        S: IntoIterator<Item = &'a B::Semaphore>;
 
     /// Dispose of the node.
     fn dispose(self, device: &mut D, aux: &mut T);
-}
-
-/// Set of barriers for the node to execute.
-pub struct Barriers<S> {
-    /// Buffer barriers.
-    pub acquire: Option<Range<(S, PipelineStage)>>,
-
-    /// Image barriers.
-    pub release: Option<Range<(S, PipelineStage)>>,
-}
-
-/// Buffer info.
-pub struct BufferInfo<'a, B: Backend> {
-    /// Id of the buffer.
-    pub id: BufferId,
-
-    /// Barriers required for the buffer.
-    pub barriers: Barriers<buffer::State>,
-
-    /// Size of the buffer.
-    pub size: u64,
-
-    /// Buffers. One per frame.
-    pub buffers: Vec<&'a B::Buffer>,
-}
-
-/// Image info.
-pub struct ImageInfo<'a, B: Backend> {
-    /// Id of the image.
-    pub id: ImageId,
-
-    /// Barriers required for the image.
-    pub barriers: Barriers<image::State>,
-
-    /// Layout in which the image is for the node.
-    pub layout: image::Layout,
-
-    /// Image kind.
-    pub kind: image::Kind,
-
-    /// Image format.
-    pub format: Format,
-
-    /// Images. One per frame.
-    pub images: Vec<&'a B::Image>,
-}
-
-/// Convenient enum to hold either `OneShot` command buffer or reference to `MultiShot`.
-/// Implements `Submittable`.
-pub enum EitherSubmit<'a, B: Backend, C: 'a, L: 'a = Primary> {
-    /// One shot submit.
-    OneShot(Submit<B, C, OneShot, L>),
-
-    /// Multi shot submit reference.
-    MultiShot(&'a Submit<B, C, MultiShot, L>),
-}
-
-impl<'a, B, C, L> From<Submit<B, C, OneShot, L>> for EitherSubmit<'a, B, C, L>
-where
-    B: Backend,
-{
-    fn from(submit: Submit<B, C, OneShot, L>) -> Self {
-        EitherSubmit::OneShot(submit)
-    }
-}
-
-impl<'a, B, C, L> From<&'a Submit<B, C, MultiShot, L>> for EitherSubmit<'a, B, C, L>
-where
-    B: Backend,
-{
-    fn from(submit: &'a Submit<B, C, MultiShot, L>) -> Self {
-        EitherSubmit::MultiShot(submit)
-    }
-}
-
-unsafe impl<'a, B, C, L> Submittable<'a, B, C, L> for EitherSubmit<'a, B, C, L>
-where
-    B: Backend,
-    L: Level,
-{
-    unsafe fn into_buffer(self) -> Cow<'a, B::CommandBuffer> {
-        match self {
-            EitherSubmit::OneShot(submit) => submit.into_buffer(),
-            EitherSubmit::MultiShot(submit) => submit.into_buffer(),
-        }
-    }
 }

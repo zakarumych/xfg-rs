@@ -1,12 +1,15 @@
 
-use std::{borrow::Borrow, iter::{empty, Empty}, ops::Range};
+use std::{borrow::Borrow, iter::{once, empty, Empty}, ops::Range};
 
 use hal::{ Backend, Device, buffer, image, Primitive, 
-    command::{CommandBuffer, OneShot, MultiShot, Primary, Submit},
+    command::{
+        CommandBuffer, OneShot, MultiShot, Primary, Submit, Submittable,
+        RenderPassInlineEncoder, ClearValue, CommandBufferFlags, RawCommandBuffer, RawLevel
+    },
     format::{Format, Swizzle},
     memory::{Dependencies, Barrier},
     image::Extent,
-    queue::Graphics,
+    queue::{CommandQueue, RawSubmission, Graphics, RawCommandQueue},
     pass::{Attachment, AttachmentOps, AttachmentLoadOp, AttachmentStoreOp, SubpassDesc, Subpass, SubpassDependency},
     pool::{CommandPool, CommandPoolCreateFlags, RawCommandPool},
     pso::{
@@ -16,6 +19,7 @@ use hal::{ Backend, Device, buffer, image, Primitive,
         StencilTest, Comparison, BakedStates, BasePipeline, Rasterizer,
         PipelineCreationFlags, DescriptorSetLayoutBinding, BufferIndex,
         GraphicsShaderSet, BlendDesc, GraphicsPipelineDesc, ShaderStageFlags,
+        Rect,
     },
 };
 
@@ -23,7 +27,7 @@ use relevant::Relevant;
 
 use smallvec::SmallVec;
 
-use node::{Node, NodeDesc, Submittables, EitherSubmit, BufferInfo, ImageInfo};
+use node::{Node, NodeDesc, BufferInfo, ImageInfo, build::NodeBuilder};
 
 /// Render pass desc.
 pub trait RenderPassDesc: Send + Sync + Sized + 'static {
@@ -43,11 +47,19 @@ pub trait RenderPassDesc: Send + Sync + Sized + 'static {
     fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)];
 
     /// Bindings for the pass.
-    fn bindings() -> &'static [DescriptorSetLayoutBinding];
+    fn bindings() -> (&'static [DescriptorSetLayoutBinding], usize);
 }
 
 /// Render pass.
-pub trait RenderPass<B: Backend, D, T>: RenderPassDesc {
+pub trait RenderPass<B, D, T>: RenderPassDesc
+where
+    B: Backend,
+    D: Device<B>,
+{
+    /// Create `NodeBuilder` for this node.
+    fn builder() -> NodeBuilder<RenderPassNode<B, Self>> {
+        RenderPassNode::builder()
+    }
 
     /// Load shader set.
     /// This function should create required shader modules and fill `GraphicsShaderSet` structure.
@@ -63,39 +75,57 @@ pub trait RenderPass<B: Backend, D, T>: RenderPassDesc {
     fn load_shader_set<'a>(storage: &'a mut Vec<B::ShaderModule>, device: &mut D, aux: &mut T) -> GraphicsShaderSet<'a, B>;
 
     /// Build pass instance.
-    fn build(
-        frames: usize,
+    fn build<I>(
+        sampled: I,
+        set: &B::DescriptorSetLayout,
         device: &mut D,
         aux: &mut T,
-    ) -> Self;
-
-    /// Record drawing commands to the command buffer provided.
-    fn run<I>(&mut self, sampled: I, frame: usize, device: &mut D, aux: &T, &mut CommandBuffer<B, Graphics>)
+    ) -> Self
     where
         I: IntoIterator,
         I::Item: Borrow<B::ImageView>,
     ;
 
+    /// Prepare to record drawing commands.
+    fn prepare(
+        &mut self,
+        set: &B::DescriptorSetLayout,
+        cbuf: &mut CommandBuffer<B, Graphics>,
+        device: &mut D,
+        aux: &T,
+    );
+
+    /// Record drawing commands to the command buffer provided.
+    fn draw(
+        &mut self,
+        pipeline: &B::PipelineLayout,
+        encoder: RenderPassInlineEncoder<B, Primary>,
+        aux: &T,
+    );
+
     /// Dispose of the pass.
     fn dispose(self, device: &mut D, aux: &mut T);
-}
-
-struct Resources<B: Backend> {
-    views: Vec<B::ImageView>,
-    framebuffer: B::Framebuffer,
-    pool: CommandPool<B, Graphics>,
-    barriers_pool: CommandPool<B, Graphics>,
-    acquire: Option<Submit<B, Graphics, MultiShot, Primary>>,
-    release: Option<Submit<B, Graphics, MultiShot, Primary>>,
 }
 
 /// Render pass node.
 pub struct RenderPassNode<B: Backend, R> {
     relevant: Relevant,
-    resources: Vec<Resources<B>>,
+
+    extent: Extent,
+
     render_pass: B::RenderPass,
+    set_layout: B::DescriptorSetLayout,
     pipeline_layout: B::PipelineLayout,
     graphics_pipeline: B::GraphicsPipeline,
+
+    views: Vec<B::ImageView>,
+    framebuffer: B::Framebuffer,
+
+    pool: CommandPool<B, Graphics>,
+    static_pool: B::CommandPool,
+    acquire: B::CommandBuffer,
+    release: Option<B::CommandBuffer>,
+
     pass: R,
 }
 
@@ -128,36 +158,28 @@ where
     }
 }
 
-impl<'a, B, D, T, R> Submittables<'a, B, D, T> for RenderPassNode<B, R>
-where
-    B: Backend,
-    R: RenderPassDesc,
-{
-    type Submittable = EitherSubmit<'a, B, Graphics>;
-    type IntoIter = SmallVec<[EitherSubmit<'a, B, Graphics>; 3]>;
-}
-
 impl<B, D, T, R> Node<B, D, T> for RenderPassNode<B, R>
 where
     B: Backend,
     D: Device<B>,
     R: RenderPass<B, D, T>,
 {
-    fn build<F>(
-        buffers: Vec<BufferInfo<B>>,
-        images: Vec<ImageInfo<B>>,
-        frames: usize,
+    fn build<F, U, I>(
+        buffers: Vec<BufferInfo<U>>,
+        images: Vec<ImageInfo<I>>,
         mut pools: F,
         device: &mut D,
         aux: &mut T,
     ) -> Self
     where
         F: FnMut(&mut D, CommandPoolCreateFlags) -> CommandPool<B, Self::Capability>,
+        U: Borrow<B::Buffer>,
+        I: Borrow<B::Image>,
     {
         trace!("Creating RenderPass instance for '{}'", R::name());
         let render_pass: B::RenderPass = {
             let attachments = (0 .. R::colors()).map(|index| Attachment {
-                format: Some(images[R::sampled() + index].format),
+                format: Some(images[R::sampled() + index].resource.format),
                 ops: AttachmentOps {
                     load: AttachmentLoadOp::Load,
                     store: AttachmentStoreOp::Store,
@@ -170,7 +192,7 @@ where
                 samples: 1,
             }).chain( if R::depth() {
                 Some(Attachment {
-                    format: Some(images[R::sampled() + R::colors()].format),
+                    format: Some(images[R::sampled() + R::colors()].resource.format),
                     ops: AttachmentOps {
                         load: AttachmentLoadOp::Load,
                         store: AttachmentStoreOp::Store,
@@ -207,8 +229,8 @@ where
         };
 
         trace!("Creating graphics pipeline for '{}'", R::name());
-        let descriptor_set_layout = device.create_descriptor_set_layout(R::bindings());
-        let pipeline_layout = device.create_pipeline_layout(Some(&descriptor_set_layout), empty::<(ShaderStageFlags, Range<u32>)>());
+        let set_layout = device.create_descriptor_set_layout(R::bindings().0);
+        let pipeline_layout = device.create_pipeline_layout(Some(&set_layout), empty::<(ShaderStageFlags, Range<u32>)>());
 
         let graphics_pipeline = {
             let mut shaders = Vec::new();
@@ -260,157 +282,177 @@ where
             result
         };
 
-        let with_acquire = buffers.iter().any(|buffer| buffer.barriers.acquire.is_some());
-        let with_release = buffers.iter().any(|buffer| buffer.barriers.release.is_some());
+        let mut extent = None;
+
+        let views = images.iter().enumerate().map(|(i, info)| {
+            if i >= R::sampled() {
+                // This is color or depth attachment.
+                assert!(extent.map_or(true, |e| e == info.resource.kind.extent()), "All attachments must have same `Extent`");
+                extent = Some(info.resource.kind.extent());
+            }
+
+            device.create_image_view(
+                info.resource.image.borrow(),
+                match info.resource.kind {
+                    image::Kind::D1(_, _) => image::ViewKind::D1,
+                    image::Kind::D2(_, _, _, _) => image::ViewKind::D2,
+                    image::Kind::D3(_, _, _) => image::ViewKind::D3,
+                },
+                info.resource.format,
+                Swizzle::NO,
+                image::SubresourceRange {
+                    aspects: info.resource.format.aspects(),
+                    levels: 0 .. 1,
+                    layers: 0 .. 1,
+                },
+            ).unwrap()
+        }).collect::<Vec<_>>();
+
+        let extent = extent.unwrap_or(Extent { width: 0, height: 0, depth: 0 });
+
+        let mut static_pool = pools(device, CommandPoolCreateFlags::empty()).into_raw();
+
+        let with_release = buffers.iter().any(|info| info.barriers.release.is_some()) || images.iter().any(|info| info.barriers.release.is_some());
+
+        let mut static_cbufs = static_pool.allocate(1 + with_release as usize, RawLevel::Primary);
+
+        let mut acquire = static_cbufs.pop().unwrap();
+        acquire.begin(CommandBufferFlags::EMPTY, Default::default());
+
+        for (barrier, buffer) in buffers.iter().filter_map(|info| info.barriers.acquire.as_ref().map(|barrier| (barrier, info.resource.buffer.borrow()))) {
+            acquire.pipeline_barrier(
+                barrier.start.1 .. barrier.end.1,
+                Dependencies::empty(),
+                Some(Barrier::Buffer {
+                    states: barrier.start.0 .. barrier.end.0,
+                    target: buffer,
+                })
+            );
+        }
+        for (barrier, image, aspects) in images.iter().filter_map(|info| info.barriers.acquire.as_ref().map(|barrier| (barrier, info.resource.image.borrow(), info.resource.format.aspects()))) {
+            acquire.pipeline_barrier(
+                barrier.start.1 .. barrier.end.1,
+                Dependencies::empty(),
+                Some(Barrier::Image {
+                    states: barrier.start.0 .. barrier.end.0,
+                    target: image,
+                    range: image::SubresourceRange {
+                        aspects,
+                        levels: 0..1,
+                        layers: 0..1,
+                    }
+                })
+            );
+        }
+        acquire.bind_graphics_pipeline(&graphics_pipeline);
+        acquire.finish();
+
+        let release = if with_release {
+            let mut release = static_cbufs.pop().unwrap();
+            release.begin(CommandBufferFlags::EMPTY, Default::default());
+            for (barrier, buffer) in buffers.iter().filter_map(|info| info.barriers.release.as_ref().map(|barrier| (barrier, info.resource.buffer.borrow()))) {
+                release.pipeline_barrier(
+                    barrier.start.1 .. barrier.end.1,
+                    Dependencies::empty(),
+                    Some(Barrier::Buffer {
+                        states: barrier.start.0 .. barrier.end.0,
+                        target: buffer,
+                    })
+                );
+            }
+
+            for (barrier, image, aspects) in images.iter().filter_map(|info| info.barriers.release.as_ref().map(|barrier| (barrier, info.resource.image.borrow(), info.resource.format.aspects()))) {
+                release.pipeline_barrier(
+                    barrier.start.1 .. barrier.end.1,
+                    Dependencies::empty(),
+                    Some(Barrier::Image {
+                        states: barrier.start.0 .. barrier.end.0,
+                        target: image,
+                        range: image::SubresourceRange {
+                            aspects,
+                            levels: 0..1,
+                            layers: 0..1,
+                        }
+                    })
+                );
+            }
+            release.finish();
+            Some(release)
+        } else {
+            None
+        };
+
+        let framebuffer = device.create_framebuffer(&render_pass, views.iter().skip(R::sampled()), extent).unwrap();
+
+        let pass = R::build(views.iter().take(R::sampled()), &set_layout, device, aux);
 
         RenderPassNode {
-            resources: (0 .. frames).map(|index| {
-                let mut extent = None;
-                let views = images.iter().enumerate().map(|(i, info)| {
-                    if i >= R::sampled() {
-                        // This is color or depth attachment.
-                        assert!(extent.map_or(true, |e| e == info.kind.extent()), "All attachments must have same `Extent`");
-                        extent = Some(info.kind.extent());
-                    }
-                    device.create_image_view(
-                        info.images[index],
-                        match info.kind {
-                            image::Kind::D1(_, _) => image::ViewKind::D1,
-                            image::Kind::D2(_, _, _, _) => image::ViewKind::D2,
-                            image::Kind::D3(_, _, _) => image::ViewKind::D3,
-                        },
-                        info.format,
-                        Swizzle::NO,
-                        image::SubresourceRange {
-                            aspects: info.format.aspects(),
-                            levels: 0 .. 1,
-                            layers: 0 .. 1,
-                        },
-                    ).unwrap()
-                }).collect::<Vec<_>>();
-
-                let extent = extent.unwrap_or(Extent { width: 0, height: 0, depth: 0 });
-
-
-                let mut barriers_pool = pools(device, CommandPoolCreateFlags::empty());
-
-                let acquire = if with_acquire {
-                    let mut cbuf = barriers_pool.acquire_command_buffer::<MultiShot>(false);
-                    for (barrier, buffer) in buffers.iter().filter_map(|info| info.barriers.acquire.as_ref().map(|barrier| (barrier, info.buffers[index]))) {
-                        cbuf.pipeline_barrier(
-                            barrier.start.1 .. barrier.end.1,
-                            Dependencies::empty(),
-                            Some(Barrier::Buffer {
-                                states: barrier.start.0 .. barrier.end.0,
-                                target: buffer,
-                            })
-                        );
-                    }
-
-                    for (barrier, image, aspects) in images.iter().filter_map(|info| info.barriers.acquire.as_ref().map(|barrier| (barrier, info.images[index], info.format.aspects()))) {
-                        cbuf.pipeline_barrier(
-                            barrier.start.1 .. barrier.end.1,
-                            Dependencies::empty(),
-                            Some(Barrier::Image {
-                                states: barrier.start.0 .. barrier.end.0,
-                                target: image,
-                                range: image::SubresourceRange {
-                                    aspects,
-                                    levels: 0..1,
-                                    layers: 0..1,
-                                }
-                            })
-                        );
-                    }
-                    Some(cbuf.finish())
-                } else {
-                    None
-                };
-
-                let release = if with_release {
-                    let mut cbuf = barriers_pool.acquire_command_buffer::<MultiShot>(false);
-                    for (barrier, buffer) in buffers.iter().filter_map(|info| info.barriers.release.as_ref().map(|barrier| (barrier, info.buffers[index]))) {
-                        cbuf.pipeline_barrier(
-                            barrier.start.1 .. barrier.end.1,
-                            Dependencies::empty(),
-                            Some(Barrier::Buffer {
-                                states: barrier.start.0 .. barrier.end.0,
-                                target: buffer,
-                            })
-                        );
-                    }
-
-                    for (barrier, image, aspects) in images.iter().filter_map(|info| info.barriers.release.as_ref().map(|barrier| (barrier, info.images[index], info.format.aspects()))) {
-                        cbuf.pipeline_barrier(
-                            barrier.start.1 .. barrier.end.1,
-                            Dependencies::empty(),
-                            Some(Barrier::Image {
-                                states: barrier.start.0 .. barrier.end.0,
-                                target: image,
-                                range: image::SubresourceRange {
-                                    aspects,
-                                    levels: 0..1,
-                                    layers: 0..1,
-                                }
-                            })
-                        );
-                    }
-                    Some(cbuf.finish())
-                } else {
-                    None
-                };
-
-                Resources {
-                    framebuffer: device.create_framebuffer(&render_pass, views.iter().skip(R::sampled()), extent).unwrap(),
-                    views,
-                    pool: pools(device, CommandPoolCreateFlags::empty()),
-                    barriers_pool,
-                    acquire,
-                    release,
-                }
-            }).collect(),
+            relevant: Relevant,
+            extent,
             render_pass,
+            set_layout: set_layout,
             pipeline_layout,
             graphics_pipeline,
-            pass: R::build(frames, device, aux),
-            relevant: Relevant,
+            pool: pools(device, CommandPoolCreateFlags::empty()),
+            static_pool,
+            acquire,
+            release,
+            views,
+            framebuffer,
+            pass,
         }
     }
 
-    fn run<'a>(
+    fn run<'a, W, S>(
         &'a mut self,
-        frame: usize,
+        wait: W,
+        queue: &mut CommandQueue<B, Graphics>,
+        signal: S,
+        fence: Option<&B::Fence>,
         device: &mut D,
         aux: &'a T,
-    ) -> SmallVec<[EitherSubmit<'a, B, Graphics>; 3]>
+    )
+    where
+        W: IntoIterator<Item = (&'a B::Semaphore, PipelineStage)>,
+        S: IntoIterator<Item = &'a B::Semaphore>,
     {
-        let ref mut resources = self.resources[frame];
-        let mut cbuf = resources.pool.acquire_command_buffer::<OneShot>(false);
-        self.pass.run(&resources.views[..R::sampled()], frame, device, aux, &mut cbuf);
-        let mut main = Some(cbuf.finish().into());
+        let area = Rect {
+            x: 0,
+            y: 0,
+            w: self.extent.width as u16,
+            h: self.extent.height as u16,
+        };
 
-        let acquire = resources.acquire.as_ref().map(Into::into);
-        let release = resources.release.as_ref().map(Into::into);
-        
-        acquire
-            .into_iter()
-            .chain(main)
-            .chain(release)
-            .collect()
-    }
-
-    fn dispose(self, device: &mut D, aux: &mut T) {
-        self.pass.dispose(device, aux);
-
-        for mut resources in self.resources {
-            drop(resources.acquire);
-            drop(resources.release);
-            resources.barriers_pool.reset();
-            resources.pool.reset();
-            device.destroy_command_pool(resources.barriers_pool.into_raw());
-            device.destroy_command_pool(resources.pool.into_raw());
+        let mut cbuf = self.pool.acquire_command_buffer::<OneShot>(false);
+        cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
+        self.pass.prepare(&self.set_layout, &mut cbuf, device, aux);
+        {
+            let encoder = cbuf.begin_render_pass_inline(&self.render_pass, &self.framebuffer, area, Vec::<ClearValue>::new());
+            self.pass.draw(&self.pipeline_layout, encoder, aux);
         }
 
+        unsafe {
+            queue.as_raw_mut().submit_raw(
+                RawSubmission {
+                    wait_semaphores: &wait.into_iter().map(|(semaphore, stage)| (semaphore.borrow(), stage)).collect::<SmallVec<[_; 16]>>(),
+                    cmd_buffers: once(&self.acquire)
+                        .chain(once(cbuf.finish().into_buffer().as_ref()))
+                        .chain(self.release.as_ref()),
+                    signal_semaphores: &signal.into_iter().map(Borrow::borrow).collect::<SmallVec<[_; 16]>>(),
+                },
+                fence,
+            );
+        }
+    }
+
+    fn dispose(mut self, device: &mut D, aux: &mut T) {
+        self.pass.dispose(device, aux);
+        drop(self.acquire);
+        drop(self.release);
+        self.static_pool.reset();
+        self.pool.reset();
+        device.destroy_command_pool(self.static_pool);
+        device.destroy_command_pool(self.pool.into_raw());
         self.relevant.dispose();
     }
 }
