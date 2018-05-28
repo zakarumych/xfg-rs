@@ -275,7 +275,7 @@ where
                     })
                 } else {
                     None
-                }).collect::<Vec<_>>();
+                });
 
             let colors = (0..R::colors())
                 .map(|index| (index, images[R::sampled() + R::storage() + index].layout))
@@ -285,6 +285,7 @@ where
             } else {
                 None
             };
+
             let subpass = SubpassDesc {
                 colors: &colors,
                 depth_stencil: depth.as_ref(),
@@ -292,8 +293,6 @@ where
                 resolves: &[],
                 preserves: &[],
             };
-
-            trace!("RenderPass for '{}' setup {:#?}, {:#?}", R::name(), attachments, subpass);
 
             let result =
                 device.create_render_pass(attachments, Some(subpass), empty::<SubpassDependency>());
