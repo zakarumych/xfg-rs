@@ -326,30 +326,36 @@ where
     let mut total = 0;
     let total = loop {
         profile!("Frame");
-        events_loop.poll_events(|_| ());
+        {
+            profile!("Polling");
+            events_loop.poll_events(|_| ());
+        }
         // Render
         render.run(&mut factory, &mut scene);
 
-        profile!("Counting");
-        total += 1;
-        if Instant::now() - start > Duration::from_millis(100) {
-            break total;
+        {
+            profile!("Counting");
+            total += 1;
+            if start.elapsed() > Duration::from_millis(1000) {
+                break total;
+            }
         }
     };
-    events_loop.poll_events(|_| ());
 
-    let end = Instant::now();
-    let dur = end - start;
-    let fps = (total as f64) / (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 10e9);
-    info!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
+    let dur = start.elapsed();
+    
+    #[cfg(feature = "profile")]
+    flame::dump_html(&mut ::std::fs::File::create("profile.html").unwrap()).unwrap();
+
+    events_loop.poll_events(|_| ());
+    let dur = (dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1e9);
+    let fps = (total as f64) / dur;
+    info!("Run time: {}", dur);
     info!("Total frames rendered: {}", total);
     info!("Average FPS: {}", fps);
 
     events_loop.poll_events(|_| ());
 
-    
-    #[cfg(feature = "profile")]
-    flame::dump_html(&mut ::std::fs::File::create("profile.html").unwrap()).unwrap();
 
     // // TODO: Dispose everything properly.
     ::std::process::exit(0);

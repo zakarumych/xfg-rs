@@ -548,8 +548,8 @@ fn graph<B>(kind: image::Kind, surface_format: Format, graph: &mut XfgGraphBuild
 where
     B: Backend,
 {
-    let ambient_roughness = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-    let emission_metallic = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
+    let ambient_roughness = graph.create_image(kind, Format::Rgba8Unorm, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
+    let emission_metallic = graph.create_image(kind, Format::Rgba8Unorm, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
     let normal_normal_ambient_occlusion = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
     let position_depth = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
     let depth = graph.create_image(kind, Format::D32Float, Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))));
