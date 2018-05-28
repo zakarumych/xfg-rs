@@ -32,6 +32,11 @@ pub trait NodeDesc: Send + Sync + Sized + 'static {
 
     /// Images used by node.
     fn images() -> Self::Images;
+
+    /// Create `NodeBuilder` for this node.
+    fn builder() -> NodeBuilder<Self> {
+        NodeBuilder::new()
+    }
 }
 
 /// Graph node - building block of the graph
@@ -40,11 +45,6 @@ where
     B: Backend,
     D: Device<B>,
 {
-    /// Create `NodeBuilder` for this node.
-    fn builder() -> NodeBuilder<Self> {
-        NodeBuilder::new()
-    }
-
     /// Build node.
     ///
     /// # Parameters

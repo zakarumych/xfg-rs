@@ -4,7 +4,7 @@ use {
         schedule::Submission, sync::SyncData,
     },
     hal::{
-        buffer, command::{CommandBufferFlags, ImageCopy, RawCommandBuffer, RawLevel},
+        buffer, command::{ClearColorRaw, ClearDepthStencilRaw, CommandBufferFlags, ImageCopy, RawCommandBuffer, RawLevel},
         format::{ChannelType, Format}, image, pool::{CommandPoolCreateFlags, RawCommandPool},
         memory::{Barrier, Dependencies},
         pso::PipelineStage, queue::{QueueFamily, RawCommandQueue, RawSubmission},
@@ -70,18 +70,19 @@ where
 
         let ref chain = chains[&self.id.0];
         let link = chain.link(submission.image(self.id.0));
-        let ref resource = resources[self.id.index()];
+        let ref resource = resources[self.id.0.index() as usize];
 
         let ref acquire = submission.sync().acquire.images.get(&self.id.0);
         let ref release = submission.sync().release.images.get(&self.id.0);
 
         let per_frame = match backbuffer {
-            Backbuffer::Images(ref images) => {
-                let cbufs = pool.allocate(images.len(), RawLevel::Primary);
+            Backbuffer::Images(ref backbuffer_images) => {
+                let cbufs = pool.allocate(backbuffer_images.len(), RawLevel::Primary);
                 cbufs
                     .into_iter()
                     .enumerate()
                     .map(|(index, mut cbuf)| {
+                        let ref backbuffer_image = backbuffer_images[index];
                         cbuf.begin(CommandBufferFlags::EMPTY, Default::default());
                         acquire.map(|acquire| {
                             cbuf.pipeline_barrier(
@@ -101,7 +102,7 @@ where
                         cbuf.copy_image(
                             resource.image.borrow(),
                             link.state().layout,
-                            &images[index],
+                            backbuffer_image,
                             image::Layout::TransferDstOptimal,
                             Some(ImageCopy {
                                 src_subresource: image::SubresourceLayers {
@@ -139,7 +140,7 @@ where
                             Dependencies::empty(),
                             Some(Barrier::Image {
                                 states: (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal) .. (image::Access::all(), image::Layout::Present),
-                                target: &images[index],
+                                target: backbuffer_image,
                                 range: image::SubresourceRange {
                                     aspects: self.format.aspects(),
                                     levels: 0..1,
@@ -147,6 +148,7 @@ where
                                 }
                             })
                         );
+
                         cbuf.finish();
 
                         (device.create_semaphore(), device.create_semaphore(), cbuf)
@@ -186,7 +188,7 @@ where
                 .unwrap()
                 .id(),
             queue: None,
-            dependencies: Vec::new(),
+            dependencies: self.dependencies.clone(),
             buffers: HashMap::new(),
             images: once((
                 self.id.0,
@@ -239,6 +241,7 @@ where
         _device: &mut D,
         _aux: &'a T,
     ) {
+        profile!("Present::run");
         assert!(sync.acquire.signal.is_empty());
         assert!(sync.release.signal.is_empty());
         assert!(sync.release.wait.is_empty());
@@ -250,10 +253,13 @@ where
             .map(|wait| (&semaphores[*wait.semaphore()], wait.stage()));
         let acquire = self.free.take().unwrap();
 
-        let frame = self
-            .swapchain
-            .acquire_frame(FrameSync::Semaphore(&acquire))
-            .id();
+        let frame = {
+            profile!("Acquire frame");
+            self
+                .swapchain
+                .acquire_frame(FrameSync::Semaphore(&acquire))
+                .id()
+        };
 
         self.free = Some(replace(&mut self.per_frame[frame].0, acquire));
         let (ref acquire, ref release, ref cbuf) = self.per_frame[frame];
@@ -267,12 +273,13 @@ where
         };
 
         unsafe {
+            profile!("Submit");
             queue.submit_raw(submission, fence);
             queue.present(Some(&mut self.swapchain), Some(release));
         }
     }
 
-    fn dispose(self: Box<Self>, device: &mut D, aux: &mut T) {
+    fn dispose(self: Box<Self>, _device: &mut D, _aux: &mut T) {
         unimplemented!()
     }
 }

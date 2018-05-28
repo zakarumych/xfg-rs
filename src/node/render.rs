@@ -19,7 +19,7 @@ use hal::{
         ColorBlendDesc, ColorMask, Comparison, DepthStencilDesc, DepthTest,
         DescriptorSetLayoutBinding, ElemStride, Element, GraphicsPipelineDesc, GraphicsShaderSet,
         InputAssemblerDesc, PipelineCreationFlags, PipelineStage, PrimitiveRestart, Rasterizer,
-        Rect, ShaderStageFlags, StencilTest, VertexBufferDesc,
+        Rect, Viewport, ShaderStageFlags, StencilTest, VertexBufferDesc,
     },
     queue::{CommandQueue, Graphics, RawCommandQueue, RawSubmission}, Backend, Device, Primitive,
 };
@@ -31,37 +31,49 @@ use smallvec::SmallVec;
 use node::{build::NodeBuilder, BufferInfo, ImageInfo, Node, NodeDesc};
 
 /// Render pass desc.
-pub trait RenderPassDesc: Send + Sync + Sized + 'static {
+pub trait RenderPassDesc<B: Backend>: Send + Sync + Sized + 'static {
     /// Name of this pass.
     fn name() -> &'static str;
 
     /// Number of images to sample.
-    fn sampled() -> usize;
+    fn sampled() -> usize { 0 }
+
+    /// Number of images to use as storage.
+    fn storage() -> usize { 0 }
 
     /// Number of color output images.
     fn colors() -> usize;
 
+    /// Get color blend description for color target by index.
+    fn color_blend(_index: usize) -> ColorBlendDesc {
+        ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)
+    }
+
     /// Is depth image used.
-    fn depth() -> bool;
+    fn depth() -> bool { false }
 
     /// Format of vertices.
-    fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)];
+    fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)] {
+        &[]
+    }
 
     /// Bindings for the pass.
-    fn bindings() -> (&'static [DescriptorSetLayoutBinding], usize);
-}
+    fn bindings() -> &'static [DescriptorSetLayoutBinding] {
+        &[]
+    }
 
-/// Render pass.
-pub trait RenderPass<B, D, T>: RenderPassDesc
-where
-    B: Backend,
-    D: Device<B>,
-{
     /// Create `NodeBuilder` for this node.
     fn builder() -> NodeBuilder<RenderPassNode<B, Self>> {
         RenderPassNode::builder()
     }
+}
 
+/// Render pass.
+pub trait RenderPass<B, D, T>: RenderPassDesc<B>
+where
+    B: Backend,
+    D: Device<B>,
+{
     /// Load shader set.
     /// This function should create required shader modules and fill `GraphicsShaderSet` structure.
     ///
@@ -80,7 +92,13 @@ where
     ) -> GraphicsShaderSet<'a, B>;
 
     /// Build pass instance.
-    fn build<I>(sampled: I, set: &B::DescriptorSetLayout, device: &mut D, aux: &mut T) -> Self
+    fn build<I>(
+        sampled: I,
+        storage: I,
+        set: &B::DescriptorSetLayout,
+        device: &mut D,
+        aux: &mut T
+    ) -> Self
     where
         I: IntoIterator,
         I::Item: Borrow<B::ImageView>;
@@ -119,6 +137,7 @@ pub struct RenderPassNode<B: Backend, R> {
 
     views: Vec<B::ImageView>,
     framebuffer: B::Framebuffer,
+    clears: Vec<ClearValue>,
 
     pool: CommandPool<B, Graphics>,
     static_pool: B::CommandPool,
@@ -132,7 +151,7 @@ pub struct RenderPassNode<B: Backend, R> {
 impl<B, R> NodeDesc for RenderPassNode<B, R>
 where
     B: Backend,
-    R: RenderPassDesc,
+    R: RenderPassDesc<B>,
 {
     type Buffers = Empty<(buffer::Usage, buffer::State, PipelineStage)>;
 
@@ -152,6 +171,16 @@ where
         let sampled = (0..R::sampled()).map(|_| {
             (
                 image::Usage::SAMPLED,
+                (
+                    image::Access::SHADER_READ,
+                    image::Layout::ShaderReadOnlyOptimal,
+                ),
+                all_graphics_shaders_stages(),
+            )
+        });
+        let storage = (0..R::storage()).map(|_| {
+            (
+                image::Usage::STORAGE,
                 (
                     image::Access::SHADER_READ,
                     image::Layout::ShaderReadOnlyOptimal,
@@ -183,7 +212,7 @@ where
             None
         };
 
-        sampled.chain(colors).chain(depth).collect()
+        sampled.chain(storage).chain(colors).chain(depth).collect()
     }
 }
 
@@ -206,44 +235,53 @@ where
         I: Borrow<B::Image>,
     {
         trace!("Creating RenderPass instance for '{}'", R::name());
+
         let render_pass: B::RenderPass = {
             let attachments = (0..R::colors())
                 .map(|index| Attachment {
-                    format: Some(images[R::sampled() + index].resource.format),
+                    format: Some(images[R::sampled() + R::storage() + index].format),
                     ops: AttachmentOps {
-                        load: AttachmentLoadOp::Clear,
+                        load: if images[R::sampled() + R::storage() + index].clear.is_some() {
+                            AttachmentLoadOp::Clear
+                        } else {
+                            AttachmentLoadOp::Load
+                        },
                         store: AttachmentStoreOp::Store,
                     },
                     stencil_ops: AttachmentOps::DONT_CARE,
                     layouts: {
-                        let layout = images[index + R::sampled()].layout;
+                        let layout = images[R::sampled() + R::storage() + index].layout;
                         layout..layout
                     },
                     samples: 1,
                 })
                 .chain(if R::depth() {
                     Some(Attachment {
-                        format: Some(images[R::sampled() + R::colors()].resource.format),
+                        format: Some(images[R::sampled() + R::storage() + R::colors()].format),
                         ops: AttachmentOps {
-                            load: AttachmentLoadOp::Load,
+                            load: if images[R::sampled() + R::storage() + R::colors()].clear.is_some() {
+                                AttachmentLoadOp::Clear
+                            } else {
+                                AttachmentLoadOp::Load
+                            },
                             store: AttachmentStoreOp::Store,
                         },
                         stencil_ops: AttachmentOps::DONT_CARE,
                         layouts: {
-                            let layout = images[R::sampled() + R::colors()].layout;
+                            let layout = images[R::sampled() + R::storage() + R::colors()].layout;
                             layout..layout
                         },
                         samples: 1,
                     })
                 } else {
                     None
-                });
+                }).collect::<Vec<_>>();
 
             let colors = (0..R::colors())
-                .map(|index| (index, images[index + R::sampled()].layout))
+                .map(|index| (index, images[R::sampled() + R::storage() + index].layout))
                 .collect::<Vec<_>>();
             let depth = if R::depth() {
-                Some((R::colors(), images[R::colors() + R::sampled()].layout))
+                Some((R::colors(), images[R::sampled() + R::storage() + R::colors()].layout))
             } else {
                 None
             };
@@ -255,6 +293,8 @@ where
                 preserves: &[],
             };
 
+            trace!("RenderPass for '{}' setup {:#?}, {:#?}", R::name(), attachments, subpass);
+
             let result =
                 device.create_render_pass(attachments, Some(subpass), empty::<SubpassDependency>());
 
@@ -262,10 +302,62 @@ where
             result
         };
 
+        let clears = (0 .. R::colors() + R::depth() as usize).map(|index| {
+            images[R::sampled() + R::storage() + index].clear.unwrap_or(ClearValue::Color(ClearColor::Float([0.3, 0.7, 0.9, 1.0])))
+        }).collect();
+
         trace!("Creating graphics pipeline for '{}'", R::name());
-        let set_layout = device.create_descriptor_set_layout(R::bindings().0);
+        let set_layout = device.create_descriptor_set_layout(R::bindings());
         let pipeline_layout = device
             .create_pipeline_layout(Some(&set_layout), empty::<(ShaderStageFlags, Range<u32>)>());
+
+        let mut extent = None;
+
+        let views = images
+            .iter()
+            .enumerate()
+            .map(|(i, info)| {
+                if i >= R::sampled() + R::storage() {
+                    // This is color or depth attachment.
+                    assert!(
+                        extent.map_or(true, |e| e == info.kind.extent()),
+                        "All attachments must have same `Extent`"
+                    );
+                    extent = Some(info.kind.extent());
+                }
+
+                device
+                    .create_image_view(
+                        info.image.borrow(),
+                        match info.kind {
+                            image::Kind::D1(_, _) => image::ViewKind::D1,
+                            image::Kind::D2(_, _, _, _) => image::ViewKind::D2,
+                            image::Kind::D3(_, _, _) => image::ViewKind::D3,
+                        },
+                        info.format,
+                        Swizzle::NO,
+                        image::SubresourceRange {
+                            aspects: info.format.aspects(),
+                            levels: 0..1,
+                            layers: 0..1,
+                        },
+                    )
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let extent = extent.unwrap_or(Extent {
+            width: 0,
+            height: 0,
+            depth: 0,
+        });
+
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            w: extent.width as _,
+            h: extent.height as _,
+        };
 
         let graphics_pipeline = {
             let mut shaders = Vec::new();
@@ -291,7 +383,7 @@ where
                     blender: BlendDesc {
                         logic_op: None,
                         targets: (0..R::colors())
-                            .map(|_| ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA))
+                            .map(|index| R::color_blend(index))
                             .collect(),
                     },
                     depth_stencil: if R::depth() {
@@ -307,7 +399,12 @@ where
                         None
                     },
                     multisampling: None,
-                    baked_states: BakedStates::default(),
+                    baked_states: BakedStates {
+                        viewport: Some(Viewport {rect, depth: 0.0 .. 1.0 }),
+                        scissor: Some(rect),
+                        blend_color: None,
+                        depth_bounds: None,
+                    },
                     layout: &pipeline_layout,
                     subpass: Subpass {
                         index: 0,
@@ -320,47 +417,6 @@ where
             trace!("Graphics pipeline created for '{}'", R::name());
             result
         };
-
-        let mut extent = None;
-
-        let views = images
-            .iter()
-            .enumerate()
-            .map(|(i, info)| {
-                if i >= R::sampled() {
-                    // This is color or depth attachment.
-                    assert!(
-                        extent.map_or(true, |e| e == info.resource.kind.extent()),
-                        "All attachments must have same `Extent`"
-                    );
-                    extent = Some(info.resource.kind.extent());
-                }
-
-                device
-                    .create_image_view(
-                        info.resource.image.borrow(),
-                        match info.resource.kind {
-                            image::Kind::D1(_, _) => image::ViewKind::D1,
-                            image::Kind::D2(_, _, _, _) => image::ViewKind::D2,
-                            image::Kind::D3(_, _, _) => image::ViewKind::D3,
-                        },
-                        info.resource.format,
-                        Swizzle::NO,
-                        image::SubresourceRange {
-                            aspects: info.resource.format.aspects(),
-                            levels: 0..1,
-                            layers: 0..1,
-                        },
-                    )
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        let extent = extent.unwrap_or(Extent {
-            width: 0,
-            height: 0,
-            depth: 0,
-        });
 
         let mut static_pool = pools(device, CommandPoolCreateFlags::empty()).into_raw();
 
@@ -376,7 +432,7 @@ where
             info.barriers
                 .acquire
                 .as_ref()
-                .map(|barrier| (barrier, info.resource.buffer.borrow()))
+                .map(|barrier| (barrier, info.buffer.borrow()))
         }) {
             acquire.pipeline_barrier(
                 barrier.start.1..barrier.end.1,
@@ -391,8 +447,8 @@ where
             info.barriers.acquire.as_ref().map(|barrier| {
                 (
                     barrier,
-                    info.resource.image.borrow(),
-                    info.resource.format.aspects(),
+                    info.image.borrow(),
+                    info.format.aspects(),
                 )
             })
         }) {
@@ -420,7 +476,7 @@ where
                 info.barriers
                     .release
                     .as_ref()
-                    .map(|barrier| (barrier, info.resource.buffer.borrow()))
+                    .map(|barrier| (barrier, info.buffer.borrow()))
             }) {
                 release.pipeline_barrier(
                     barrier.start.1..barrier.end.1,
@@ -436,8 +492,8 @@ where
                 info.barriers.release.as_ref().map(|barrier| {
                     (
                         barrier,
-                        info.resource.image.borrow(),
-                        info.resource.format.aspects(),
+                        info.image.borrow(),
+                        info.format.aspects(),
                     )
                 })
             }) {
@@ -462,10 +518,10 @@ where
         };
 
         let framebuffer = device
-            .create_framebuffer(&render_pass, views.iter().skip(R::sampled()), extent)
+            .create_framebuffer(&render_pass, views.iter().skip(R::sampled() + R::storage()), extent)
             .unwrap();
 
-        let pass = R::build(views.iter().take(R::sampled()), &set_layout, device, aux);
+        let pass = R::build(&views[..R::sampled()], &views[R::sampled() .. R::sampled() + R::storage()], &set_layout, device, aux);
 
         RenderPassNode {
             relevant: Relevant,
@@ -480,10 +536,12 @@ where
             release,
             views,
             framebuffer,
+            clears,
             pass,
         }
     }
 
+    #[inline]
     fn run<'a, W, S>(
         &'a mut self,
         wait: W,
@@ -496,6 +554,8 @@ where
         W: IntoIterator<Item = (&'a B::Semaphore, PipelineStage)>,
         S: IntoIterator<Item = &'a B::Semaphore>,
     {
+        profile!("RenderPassNode::run");
+
         let area = Rect {
             x: 0,
             y: 0,
@@ -504,19 +564,33 @@ where
         };
 
         let mut cbuf = self.pool.acquire_command_buffer::<OneShot>(false);
-        cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
-        self.pass.prepare(&self.set_layout, &mut cbuf, device, aux);
+
         {
-            let encoder = cbuf.begin_render_pass_inline(
-                &self.render_pass,
-                &self.framebuffer,
-                area,
-                Some(ClearValue::Color(ClearColor::Float([0.0; 4]))),
-            );
-            self.pass.draw(&self.pipeline_layout, encoder, aux);
+            profile!("bind graphics pipeline");
+            cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
+        }
+        {
+            profile!("Render pass prepare");
+            self.pass.prepare(&self.set_layout, &mut cbuf, device, aux);
+        }
+        {
+            let encoder = {
+                profile!("begin render pass");
+                cbuf.begin_render_pass_inline(
+                    &self.render_pass,
+                    &self.framebuffer,
+                    area,
+                    &self.clears,
+                )
+            };
+            {
+                profile!("Render pass draw");
+                self.pass.draw(&self.pipeline_layout, encoder, aux);
+            }
         }
 
         unsafe {
+            profile!("Submission");
             queue.as_raw_mut().submit_raw(
                 RawSubmission {
                     wait_semaphores: &wait

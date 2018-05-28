@@ -1,8 +1,10 @@
-pub extern crate cgmath;
-pub extern crate gfx_hal as hal;
-pub extern crate gfx_mesh as mesh;
-pub extern crate gfx_render as gfx;
-pub extern crate xfg;
+extern crate cgmath;
+extern crate gfx_hal as hal;
+extern crate gfx_mesh as mesh;
+extern crate gfx_render as gfx;
+extern crate genmesh;
+extern crate smallvec;
+extern crate xfg;
 
 #[macro_use]
 extern crate glsl_layout;
@@ -21,6 +23,21 @@ extern crate gfx_backend_metal as backend;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as backend;
 
+#[cfg(feature = "profile")]
+extern crate flame;
+
+#[cfg(feature = "profile")]
+macro_rules! profile {
+    ($name:tt) => {
+        let guard = ::flame::start_guard(concat!("'", $name, "' at : ", line!()));
+    }
+}
+
+#[cfg(not(feature = "profile"))]
+macro_rules! profile {
+    ($name:tt) => {}
+}
+
 type Back = backend::Backend;
 
 use std::{
@@ -28,13 +45,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use cgmath::{Deg, Matrix4, PerspectiveFov, SquareMatrix, Transform};
+use cgmath::{Deg, Point3, Matrix4, PerspectiveFov, SquareMatrix, Transform, EuclideanSpace};
 
 use gfx::{BackendEx, Buffer, Factory, Image, Render, Renderer};
 use glsl_layout::*;
 
 use hal::{
-    buffer, command::{CommandBuffer, Primary, RenderPassInlineEncoder}, device::WaitFor,
+    buffer, command::{ClearValue, ClearColor, ClearDepthStencil, CommandBuffer, Primary, RenderPassInlineEncoder}, device::WaitFor,
     format::{ChannelType, Format}, image, image::{Extent, StorageFlags, Tiling},
     memory::{cast_slice, Barrier, Dependencies, Pod, Properties},
     pool::{CommandPool, CommandPoolCreateFlags},
@@ -42,14 +59,16 @@ use hal::{
         AllocationError, Descriptor, DescriptorPool, DescriptorRangeDesc,
         DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, ElemStride, Element,
         EntryPoint, GraphicsShaderSet, PipelineStage, Rect, ShaderStageFlags, VertexBufferSet,
-        Viewport,
+        Viewport, ColorBlendDesc, ColorMask, BlendState,
     },
     queue::{Graphics, QueueFamilyId},
     window::{Backbuffer, Extent2D, Frame, FrameSync, Swapchain, SwapchainConfig}, Backend, Device,
     Instance, PhysicalDevice, Surface,
 };
 
-use mesh::{AsVertexFormat, Mesh, MeshBuilder, PosColor};
+use mesh::{AsVertexFormat, Mesh, MeshBuilder, PosColor, PosNorm};
+
+use smallvec::SmallVec;
 
 use winit::{EventsLoop, WindowBuilder};
 
@@ -82,7 +101,7 @@ where
         layout: &B::DescriptorSetLayout,
     ) -> B::DescriptorSet
     where
-        R: RenderPassDesc,
+        R: RenderPassDesc<B>,
         D: Device<B>,
     {
         let ref mut pools = self.pools;
@@ -99,10 +118,10 @@ where
                     Err(err) => panic!("Unhandled error in XfgDescriptorPool: {}", err),
                 })
                 .unwrap_or_else(|| {
-                    let multiplier = R::bindings().1.pow(exp);
+                    let multiplier = 2usize.pow(exp);
                     let mut pool = device.create_descriptor_pool(
                         multiplier,
-                        bindings_to_range(multiplier, R::bindings().0),
+                        bindings_to_range(multiplier, R::bindings()),
                     );
 
                     let set = match pool.allocate_set(layout) {
@@ -127,7 +146,6 @@ where
 
 pub struct Cache<B: Backend> {
     pub uniforms: Vec<Buffer<B>>,
-    pub views: Vec<B::ImageView>,
     pub set: B::DescriptorSet,
 }
 
@@ -195,7 +213,7 @@ where
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
 pub fn run<G, F, T>(_: G, _: F)
 where
-    G: FnOnce(image::Kind, ImageId, &mut XfgGraphBuilder<Back>),
+    G: FnOnce(image::Kind, Format, &mut XfgGraphBuilder<Back, T>) -> ImageId,
     F: FnOnce(&mut Scene<Back, T>, &mut Factory<Back>),
 {
     env_logger::init();
@@ -208,7 +226,7 @@ where
 #[deny(dead_code)]
 pub fn run<G, F, T: 'static>(graph: G, fill: F)
 where
-    G: FnOnce(image::Kind, ImageId, &mut XfgGraphBuilder<Back, T>),
+    G: FnOnce(image::Kind, Format, &mut XfgGraphBuilder<Back, T>) -> ImageId,
     F: FnOnce(&mut Scene<Back, T>, &mut Factory<Back>),
 {
     use std::iter::once;
@@ -217,7 +235,7 @@ where
     let mut events_loop = EventsLoop::new();
 
     let wb = WindowBuilder::new()
-        .with_dimensions(960, 640)
+        .with_dimensions(640, 480)
         .with_title("flat".to_string());
 
     let window = wb.build(&events_loop).unwrap();
@@ -244,8 +262,12 @@ where
         },
     };
 
+    events_loop.poll_events(|_| ());
+
     // fill scene
     fill(&mut scene, &mut factory);
+
+    events_loop.poll_events(|_| ());
 
     render
         .set_render(
@@ -253,6 +275,7 @@ where
             &mut factory,
             &mut scene,
             |surface, families, factory, scene| -> Result<_, ::std::io::Error> {
+                profile!("render setup");
                 let (capabilites, formats) = factory.capabilities_and_formats(&surface);
                 let surface_format = formats.map_or(Format::Rgba8Srgb, |formats| {
                     info!("Surface formats: {:#?}", formats);
@@ -264,10 +287,9 @@ where
                 });
                 info!("Chosen surface format: {:#?}", surface_format);
 
-                let extent = capabilites.current_extent.unwrap_or(Extent2D {
-                    width: 960,
-                    height: 640,
-                });
+                let extent = surface.kind().extent();
+
+                info!("Extent: {:#?}", extent);
 
                 scene.camera.projection = PerspectiveFov {
                     fovy: Deg(60.0).into(),
@@ -279,9 +301,9 @@ where
                 let kind = image::Kind::D2(extent.width.into(), extent.height.into(), 1, 1);
 
                 let mut builder = GraphBuilder::new();
-                let surface_id = builder.create_image(kind, surface_format);
-                graph(kind, surface_id, &mut builder);
+                let surface_id = graph(kind, surface_format, &mut builder);
 
+                profile!("graph building");
                 Ok(builder
                     .build(
                         families,
@@ -303,14 +325,18 @@ where
     let start = Instant::now();
     let mut total = 0;
     let total = loop {
+        profile!("Frame");
+        events_loop.poll_events(|_| ());
         // Render
         render.run(&mut factory, &mut scene);
 
+        profile!("Counting");
         total += 1;
-        if Instant::now() - start > Duration::from_secs(1) {
+        if Instant::now() - start > Duration::from_millis(100) {
             break total;
         }
     };
+    events_loop.poll_events(|_| ());
 
     let end = Instant::now();
     let dur = end - start;
@@ -318,6 +344,12 @@ where
     info!("Run time: {}.{:09}", dur.as_secs(), dur.subsec_nanos());
     info!("Total frames rendered: {}", total);
     info!("Average FPS: {}", fps);
+
+    events_loop.poll_events(|_| ());
+
+    
+    #[cfg(feature = "profile")]
+    flame::dump_html(&mut ::std::fs::File::create("profile.html").unwrap()).unwrap();
 
     // // TODO: Dispose everything properly.
     ::std::process::exit(0);

@@ -8,7 +8,7 @@ use hal::{
 
 use chain::{
     chain::{BufferChains, ImageChains}, pass::{Pass, PassId, StateUsage},
-    resource::{Buffer, BufferLayout, Image, State}, schedule::Submission, sync::SyncData,
+    resource::{Access, Buffer, BufferLayout, Image, State}, schedule::Submission, sync::SyncData,
 };
 
 use node::{low::*, Barriers, BufferInfo, ImageInfo, Node, NodeDesc};
@@ -60,6 +60,18 @@ where
     /// This id will be associated with next image from `Node::IMAGES` starting from `0`.
     pub fn with_image(mut self, id: ImageId) -> Self {
         self.add_image(id);
+        self
+    }
+
+    /// Add dependency to another node.
+    pub fn add_dependency(&mut self, id: NodeId) -> &mut Self {
+        self.dependencies.push(id.0);
+        self
+    }
+
+    /// Add dependency to another node.
+    pub fn with_dependency(mut self, id: NodeId) -> Self {
+        self.add_dependency(id);
         self
     }
 }
@@ -194,19 +206,23 @@ fn buffer_info<'a, U, S, W>(
 ) -> Vec<BufferInfo<'a, U>> {
     buffers
         .iter()
-        .map(|&id| BufferInfo {
-            id,
-            barriers: Barriers {
-                acquire: submission.sync().acquire.buffers.get(&id.0).map(|barrier| {
-                    let Range { ref start, ref end } = barrier.states;
-                    (start.access, start.stages)..(end.access, end.stages)
-                }),
-                release: submission.sync().release.buffers.get(&id.0).map(|barrier| {
-                    let Range { ref start, ref end } = barrier.states;
-                    (start.access, start.stages)..(end.access, end.stages)
-                }),
-            },
-            resource: &resources[id.0.index() as usize],
+        .map(|&id| {
+            let ref resource = resources[id.0.index() as usize];
+            BufferInfo {
+                id,
+                barriers: Barriers {
+                    acquire: submission.sync().acquire.buffers.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
+                        (start.access, start.stages)..(end.access, end.stages)
+                    }),
+                    release: submission.sync().release.buffers.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
+                        (start.access, start.stages)..(end.access, end.stages)
+                    }),
+                },
+                size: resource.size,
+                buffer: &resource.buffer,
+            }
         })
         .collect()
 }
@@ -219,22 +235,36 @@ fn image_info<'a, I, S, W>(
 ) -> Vec<ImageInfo<'a, I>> {
     images
         .iter()
-        .map(|&id| ImageInfo {
-            id,
-            barriers: Barriers {
-                acquire: submission.sync().acquire.images.get(&id.0).map(|barrier| {
-                    let Range { ref start, ref end } = barrier.states;
-                    ((start.access, start.layout), start.stages)
-                        ..((end.access, end.layout), end.stages)
+        .map(|&id| {
+            let ref resource = resources[id.0.index() as usize];
+            let link = chains[&id.0].link(submission.image(id.0));
+            ImageInfo {
+                id,
+                barriers: Barriers {
+                    acquire: submission.sync().acquire.images.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
+                        ((start.access, start.layout), start.stages)
+                            ..((end.access, end.layout), end.stages)
+                    }),
+                    release: submission.sync().release.images.get(&id.0).map(|barrier| {
+                        let Range { ref start, ref end } = barrier.states;
+                        ((start.access, start.layout), start.stages)
+                            ..((end.access, end.layout), end.stages)
+                    }),
+                },
+                layout: link.state().layout,
+                kind: resource.kind,
+                format: resource.format,
+                clear: resource.clear.and_then(|clear| {
+                    if submission.image(id.0) == 0 {
+                        assert!(link.state().access.is_write(), "First node must do writing in order to be able to clear image");
+                        Some(clear)
+                    } else {
+                        None
+                    }
                 }),
-                release: submission.sync().release.images.get(&id.0).map(|barrier| {
-                    let Range { ref start, ref end } = barrier.states;
-                    ((start.access, start.layout), start.stages)
-                        ..((end.access, end.layout), end.stages)
-                }),
-            },
-            layout: chains[&id.0].link(submission.image(id.0)).state().layout,
-            resource: &resources[id.0.index() as usize],
+                image: &resource.image,
+            }
         })
         .collect()
 }

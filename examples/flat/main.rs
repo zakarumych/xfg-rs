@@ -19,7 +19,7 @@ struct DrawFlat<B: Backend> {
     pool: XfgDescriptorPool<B>,
 }
 
-impl<B> RenderPassDesc for DrawFlat<B>
+impl<B> RenderPassDesc<B> for DrawFlat<B>
 where
     B: Backend,
 {
@@ -27,16 +27,12 @@ where
         "DrawFlat"
     }
 
-    fn sampled() -> usize {
-        0
-    }
-
     fn colors() -> usize {
         1
     }
 
     fn depth() -> bool {
-        false
+        true
     }
 
     fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)] {
@@ -65,16 +61,13 @@ where
         vertices
     }
 
-    fn bindings() -> (&'static [DescriptorSetLayoutBinding], usize) {
-        (
-            &[DescriptorSetLayoutBinding {
-                binding: 0,
-                ty: DescriptorType::UniformBuffer,
-                count: 1,
-                stage_flags: ShaderStageFlags::VERTEX,
-            }],
-            32,
-        )
+    fn bindings() -> &'static [DescriptorSetLayoutBinding] {
+        &[DescriptorSetLayoutBinding {
+            binding: 0,
+            ty: DescriptorType::UniformBuffer,
+            count: 1,
+            stage_flags: ShaderStageFlags::VERTEX,
+        }]
     }
 }
 
@@ -118,6 +111,7 @@ where
 
     fn build<I>(
         _sampled: I,
+        _storage: I,
         _set: &B::DescriptorSetLayout,
         _device: &mut Factory<B>,
         _aux: &mut Scene<B>,
@@ -166,21 +160,21 @@ where
                 }));
                 Cache {
                     uniforms: vec![buffer],
-                    views: Vec::new(),
                     set,
                 }
             });
-            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
-        }
 
-        cbuf.pipeline_barrier(
-            PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER,
-            Dependencies::empty(),
-            scene.objects.iter().map(|object| Barrier::Buffer {
-                target: unsafe { &*object.cache.get() }.as_ref().unwrap().uniforms[0].borrow(),
-                states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
-            }),
-        );
+            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[trprojview]));
+
+            cbuf.pipeline_barrier(
+                PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER,
+                Dependencies::empty(),
+                scene.objects.iter().map(|object| Barrier::Buffer {
+                    target: unsafe { &*object.cache.get() }.as_ref().unwrap().uniforms[0].borrow(),
+                    states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
+                }),
+            );
+        }
     }
 
     fn draw(
@@ -378,13 +372,15 @@ where
     builder.build(QueueFamilyId(0), factory).unwrap()
 }
 
-fn graph<B>(kind: image::Kind, target: ImageId, graph: &mut XfgGraphBuilder<B>)
+fn graph<B>(kind: image::Kind, surface_format: Format, graph: &mut XfgGraphBuilder<B>) -> ImageId
 where
     B: Backend,
 {
-    // let depth = graph.create_image(kind, Format::D32Float);
+    let surface = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.05, 0.02, 0.05, 1.0]))));
+    let depth = graph.create_image(kind, Format::D32Float, Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))));
 
-    graph.add_node(DrawFlat::builder().with_image(target));
+    graph.add_node(DrawFlat::builder().with_image(surface).with_image(depth));
+    surface
 }
 
 fn fill<B>(scene: &mut Scene<B>, factory: &mut Factory<B>)
