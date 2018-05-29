@@ -258,11 +258,7 @@ where
         for family in schedule.iter() {
             for queue in family.iter() {
                 for (sid, submission) in queue.iter() {
-                    let node_builder = nodes[submission.pass().0].take().unwrap();
-
-                    println!("{:#?}: {} / {:#?}", sid, node_builder.name(), submission);
-
-                    let node = node_builder.build(
+                    let node = nodes[submission.pass().0].take().unwrap().build(
                         submission,
                         &chains.buffers,
                         &buffers,
