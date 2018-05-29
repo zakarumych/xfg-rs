@@ -3,7 +3,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-include!("../lib.rs");
+include!("../common/lib.rs");
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -591,8 +591,8 @@ where
 
     let sphere = Arc::new(create_sphere(factory));
 
-    for i in 0..6 {
-        for j in 0..6 {
+    for i in 0..=5 {
+        for j in 0..=5 {
             let transform = Matrix4::from_translation(
                 [2.5 * (i as f32) - 6.25, 2.5 * (j as f32) - 6.25, 0.0].into(),
             );

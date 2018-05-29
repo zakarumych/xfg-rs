@@ -66,7 +66,7 @@ use hal::{
     Instance, PhysicalDevice, Surface,
 };
 
-use mesh::{AsVertexFormat, Mesh, MeshBuilder, PosColor, PosNorm};
+use mesh::{AsVertexFormat, Mesh, MeshBuilder, PosColor, PosNorm, Bind};
 
 use smallvec::SmallVec;
 

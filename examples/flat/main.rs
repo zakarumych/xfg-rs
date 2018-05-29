@@ -2,7 +2,7 @@
 #![deny(unused_must_use)]
 #![allow(dead_code)]
 
-include!("../lib.rs");
+include!("../common/lib.rs");
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -575,6 +575,7 @@ where
             h: self.extent.height as u16,
         };
 
+        self.pool.reset();
         let mut cbuf = self.pool.acquire_command_buffer::<OneShot>(false);
 
         {
