@@ -112,9 +112,8 @@ where
                 .last_mut()
                 .and_then(|pool| match pool.allocate_set(layout) {
                     Ok(set) => Some(set),
-                    Err(AllocationError::OutOfPoolMemory) => None,
-                    Err(AllocationError::FragmentedPool)
-                    | Err(AllocationError::IncompatibleLayout) => unreachable!(),
+                    Err(AllocationError::OutOfPoolMemory) | Err(AllocationError::FragmentedPool) => None,
+                    Err(AllocationError::IncompatibleLayout) => unreachable!(),
                     Err(err) => panic!("Unhandled error in XfgDescriptorPool: {}", err),
                 })
                 .unwrap_or_else(|| {

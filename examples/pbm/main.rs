@@ -236,8 +236,8 @@ where
             cbuf.pipeline_barrier(
                 PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER|PipelineStage::FRAGMENT_SHADER,
                 Dependencies::empty(),
-                scene.objects.iter().map(|object| Barrier::Buffer {
-                    target: unsafe { &*object.cache.get() }.as_ref().unwrap().uniforms[0].borrow(),
+                Some(Barrier::Buffer {
+                    target: cache.uniforms[0].borrow(),
                     states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
                 }),
             );
@@ -507,8 +507,8 @@ where
             cbuf.pipeline_barrier(
                 PipelineStage::TRANSFER..PipelineStage::FRAGMENT_SHADER,
                 Dependencies::empty(),
-                scene.objects.iter().map(|object| Barrier::Buffer {
-                    target: unsafe { &*object.cache.get() }.as_ref().unwrap().uniforms[0].borrow(),
+                Some(Barrier::Buffer {
+                    target: cache.uniforms[0].borrow(),
                     states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
                 }),
             );
@@ -548,8 +548,8 @@ fn graph<B>(kind: image::Kind, surface_format: Format, graph: &mut XfgGraphBuild
 where
     B: Backend,
 {
-    let ambient_roughness = graph.create_image(kind, Format::Rgba8Unorm, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-    let emission_metallic = graph.create_image(kind, Format::Rgba8Unorm, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
+    let ambient_roughness = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
+    let emission_metallic = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
     let normal_normal_ambient_occlusion = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
     let position_depth = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
     let depth = graph.create_image(kind, Format::D32Float, Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))));

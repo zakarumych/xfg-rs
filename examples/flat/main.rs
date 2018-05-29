@@ -169,8 +169,8 @@ where
             cbuf.pipeline_barrier(
                 PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER,
                 Dependencies::empty(),
-                scene.objects.iter().map(|object| Barrier::Buffer {
-                    target: unsafe { &*object.cache.get() }.as_ref().unwrap().uniforms[0].borrow(),
+                Some(Barrier::Buffer {
+                    target: cache.uniforms[0].borrow(),
                     states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
                 }),
             );

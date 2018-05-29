@@ -7,6 +7,7 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/omni-viral/xfg-rs"
 
 [features]
+vulkan = ["gfx-render/gfx-backend-vulkan"]
 metal = ["gfx-render/gfx-backend-metal"]
 profile = ["gfx-render/profile", "flame"]
 
