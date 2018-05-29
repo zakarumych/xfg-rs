@@ -277,7 +277,12 @@ where
                         stencil_ops: AttachmentOps::DONT_CARE,
                         layouts: {
                             let layout = depth_info().layout;
-                            layout..layout
+                            let from = if depth_info().clear.is_some() {
+                                image::Layout::Undefined
+                            } else {
+                                layout
+                            };
+                            from..layout
                         },
                         samples: 1,
                     })
