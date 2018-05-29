@@ -99,6 +99,19 @@ where
                                 })
                             );
                         });
+                        cbuf.pipeline_barrier(
+                            PipelineStage::BOTTOM_OF_PIPE .. PipelineStage::TRANSFER,
+                            Dependencies::empty(),
+                            Some(Barrier::Image {
+                                states: (image::Access::empty(), image::Layout::Present) .. (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal),
+                                target: backbuffer_image,
+                                range: image::SubresourceRange {
+                                    aspects: self.format.aspects(),
+                                    levels: 0..1,
+                                    layers: 0..1,
+                                }
+                            })
+                        );
                         cbuf.copy_image(
                             resource.image.borrow(),
                             link.state().layout,
@@ -120,6 +133,19 @@ where
                                 extent: resource.kind.extent(),
                             }),
                         );
+                        cbuf.pipeline_barrier(
+                            PipelineStage::TRANSFER .. PipelineStage::TOP_OF_PIPE,
+                            Dependencies::empty(),
+                            Some(Barrier::Image {
+                                states: (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal) .. (image::Access::empty(), image::Layout::Present),
+                                target: backbuffer_image,
+                                range: image::SubresourceRange {
+                                    aspects: self.format.aspects(),
+                                    levels: 0..1,
+                                    layers: 0..1,
+                                }
+                            })
+                        );
                         release.map(|release| {
                             cbuf.pipeline_barrier(
                                 release.states.start.stages .. release.states.end.stages,
@@ -135,19 +161,6 @@ where
                                 })
                             );
                         });
-                        cbuf.pipeline_barrier(
-                            PipelineStage::TRANSFER .. PipelineStage::TOP_OF_PIPE,
-                            Dependencies::empty(),
-                            Some(Barrier::Image {
-                                states: (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal) .. (image::Access::empty(), image::Layout::Present),
-                                target: backbuffer_image,
-                                range: image::SubresourceRange {
-                                    aspects: self.format.aspects(),
-                                    levels: 0..1,
-                                    layers: 0..1,
-                                }
-                            })
-                        );
 
                         cbuf.finish();
 
