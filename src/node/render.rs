@@ -236,12 +236,15 @@ where
     {
         trace!("Creating RenderPass instance for '{}'", R::name());
 
+        let color_info = |index| &images[R::sampled() + R::storage() + index];
+        let depth_info = || &images[R::sampled() + R::storage() + R::colors()];
+
         let render_pass: B::RenderPass = {
             let attachments = (0..R::colors())
                 .map(|index| Attachment {
-                    format: Some(images[R::sampled() + R::storage() + index].format),
+                    format: Some(color_info(index).format),
                     ops: AttachmentOps {
-                        load: if images[R::sampled() + R::storage() + index].clear.is_some() {
+                        load: if color_info(index).clear.is_some() {
                             AttachmentLoadOp::Clear
                         } else {
                             AttachmentLoadOp::Load
@@ -250,16 +253,21 @@ where
                     },
                     stencil_ops: AttachmentOps::DONT_CARE,
                     layouts: {
-                        let layout = images[R::sampled() + R::storage() + index].layout;
-                        layout..layout
+                        let layout = color_info(index).layout;
+                        let from = if color_info(index).clear.is_some() {
+                            image::Layout::Undefined
+                        } else {
+                            layout
+                        };
+                        from..layout
                     },
                     samples: 1,
                 })
                 .chain(if R::depth() {
                     Some(Attachment {
-                        format: Some(images[R::sampled() + R::storage() + R::colors()].format),
+                        format: Some(depth_info().format),
                         ops: AttachmentOps {
-                            load: if images[R::sampled() + R::storage() + R::colors()].clear.is_some() {
+                            load: if depth_info().clear.is_some() {
                                 AttachmentLoadOp::Clear
                             } else {
                                 AttachmentLoadOp::Load
@@ -268,7 +276,7 @@ where
                         },
                         stencil_ops: AttachmentOps::DONT_CARE,
                         layouts: {
-                            let layout = images[R::sampled() + R::storage() + R::colors()].layout;
+                            let layout = depth_info().layout;
                             layout..layout
                         },
                         samples: 1,
@@ -278,10 +286,10 @@ where
                 });
 
             let colors = (0..R::colors())
-                .map(|index| (index, images[R::sampled() + R::storage() + index].layout))
+                .map(|index| (index, color_info(index).layout))
                 .collect::<Vec<_>>();
             let depth = if R::depth() {
-                Some((R::colors(), images[R::sampled() + R::storage() + R::colors()].layout))
+                Some((R::colors(), depth_info().layout))
             } else {
                 None
             };
@@ -301,9 +309,9 @@ where
             result
         };
 
-        let clears = (0 .. R::colors() + R::depth() as usize).map(|index| {
-            images[R::sampled() + R::storage() + index].clear.unwrap_or(ClearValue::Color(ClearColor::Float([0.3, 0.7, 0.9, 1.0])))
-        }).collect();
+        let clears = (0 .. R::colors()).map(|index| {
+            color_info(index).clear.unwrap_or(ClearValue::Color(ClearColor::Float([0.3, 0.7, 0.9, 1.0])))
+        }).chain(if R::depth() { depth_info().clear } else { None }).collect();
 
         trace!("Creating graphics pipeline for '{}'", R::name());
         let set_layout = device.create_descriptor_set_layout(R::bindings());
@@ -623,9 +631,9 @@ where
 
 fn all_graphics_shaders_stages() -> PipelineStage {
     PipelineStage::VERTEX_SHADER
-        | PipelineStage::DOMAIN_SHADER
-        | PipelineStage::HULL_SHADER
-        | PipelineStage::GEOMETRY_SHADER
+        // | PipelineStage::DOMAIN_SHADER
+        // | PipelineStage::HULL_SHADER
+        // | PipelineStage::GEOMETRY_SHADER
         | PipelineStage::FRAGMENT_SHADER
 }
 

@@ -217,12 +217,6 @@ where
 
         trace!("Scheduled nodes execution {:#?}", chains);
 
-        let mut semaphores = GenId::new();
-        let schedule = sync(&chains, || {
-            let id = semaphores.next();
-            (id, id)
-        });
-
         trace!("Allocate buffers");
         let buffers = self
             .buffers
@@ -255,10 +249,20 @@ where
 
         let mut built_nodes: Vec<Option<Box<AnyNode<B, D, T>>>> = (0..nodes.len()).map(|_| None).collect();
 
+        let mut semaphores = GenId::new();
+        let schedule = sync(&chains, || {
+            let id = semaphores.next();
+            (id, id)
+        });
+
         for family in schedule.iter() {
             for queue in family.iter() {
                 for (sid, submission) in queue.iter() {
-                    let node = nodes[submission.pass().0].take().unwrap().build(
+                    let node_builder = nodes[submission.pass().0].take().unwrap();
+
+                    println!("{:#?}: {} / {:#?}", sid, node_builder.name(), submission);
+
+                    let node = node_builder.build(
                         submission,
                         &chains.buffers,
                         &buffers,
@@ -275,7 +279,7 @@ where
 
         Graph {
             nodes: built_nodes.into_iter().map(Option::unwrap).collect(),
-            schedule: schedule,
+            schedule,
             semaphores: (0..semaphores.total())
                 .map(|_| device.create_semaphore())
                 .collect(),
