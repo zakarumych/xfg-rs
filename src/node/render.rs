@@ -195,7 +195,7 @@ where
                     image::Access::COLOR_ATTACHMENT_READ | image::Access::COLOR_ATTACHMENT_WRITE,
                     image::Layout::ColorAttachmentOptimal,
                 ),
-                all_graphics_shaders_stages(),
+                PipelineStage::COLOR_ATTACHMENT_OUTPUT,
             )
         });
         let depth = if R::depth() {
@@ -206,7 +206,7 @@ where
                         | image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
                     image::Layout::DepthStencilAttachmentOptimal,
                 ),
-                all_graphics_shaders_stages(),
+                PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS,
             ))
         } else {
             None
