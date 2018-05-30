@@ -190,6 +190,7 @@ where
         Y: FnMut(image::Kind, Format, image::Usage, &mut D, &mut T) -> I,
         P: IntoIterator<Item = PresentBuilder<'a, B>>,
     {
+        trace!("Build Graph");
         use chain::{build, pass::Pass};
 
         let families = families.into_iter().collect::<Vec<_>>();
@@ -249,16 +250,24 @@ where
 
         let mut built_nodes: Vec<Option<Box<AnyNode<B, D, T>>>> = (0..nodes.len()).map(|_| None).collect();
 
+        trace!("Synchronize");
         let mut semaphores = GenId::new();
         let schedule = sync(&chains, || {
             let id = semaphores.next();
             (id, id)
         });
+        trace!("Schedule: {:#?}", schedule);
 
+        trace!("Build nodes");
         for family in schedule.iter() {
+            trace!("For family {:#?}", family);
             for queue in family.iter() {
+                trace!("For queue {:#?}", queue.id());
                 for (sid, submission) in queue.iter() {
-                    let node = nodes[submission.pass().0].take().unwrap().build(
+                    trace!("For submission {:#?}", sid);
+                    let builder = nodes[submission.pass().0].take().unwrap();
+                    trace!("Build node {}", builder.name());
+                    let node = builder.build(
                         submission,
                         &chains.buffers,
                         &buffers,
@@ -274,7 +283,7 @@ where
         }
 
         Graph {
-            nodes: built_nodes.into_iter().map(Option::unwrap).collect(),
+            nodes: built_nodes.into_iter().map(|node| node.unwrap()).collect(),
             schedule,
             semaphores: (0..semaphores.total())
                 .map(|_| device.create_semaphore())

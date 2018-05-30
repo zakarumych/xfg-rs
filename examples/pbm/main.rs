@@ -165,31 +165,33 @@ where
 
         unsafe impl Pod for FragmentArgs {}
 
+        profile!("DrawColorDepthNormal::prepare");
         let view = scene.camera.transform.inverse_transform().unwrap();
         // Update uniform cache
         for object in &scene.objects {
-            let vertex_args = VertexArgs {
-                model: object.transform,
-                proj: scene.camera.projection,
-                view,
-            };
-
-            let fragment_args = FragmentArgs {
-                albedo: object.data.albedo,
-                metallic: object.data.metallic,
-                emission: object.data.emission,
-                roughness: object.data.roughness,
-                ambient_occlusion: object.data.ambient_occlusion,
-            };
-
-            let vertex_args_range = Some(0)..Some(::std::mem::size_of::<VertexArgs>() as u64);
-            let fragment_args_offset = shift_for_alignment(256, vertex_args_range.end.unwrap());
-            let fragment_args_range = Some(fragment_args_offset)
-                ..Some(fragment_args_offset + ::std::mem::size_of::<FragmentArgs>() as u64);
-
+            profile!("Prepare object");
             let mut cache = unsafe { &mut *object.cache.get() };
-
             let cache = cache.get_or_insert_with(|| {
+                profile!("Build cache");
+
+                let vertex_args = VertexArgs {
+                    model: object.transform,
+                    proj: scene.camera.projection,
+                    view,
+                };
+
+                let fragment_args = FragmentArgs {
+                    albedo: object.data.albedo,
+                    metallic: object.data.metallic,
+                    emission: object.data.emission,
+                    roughness: object.data.roughness,
+                    ambient_occlusion: object.data.ambient_occlusion,
+                };
+
+                let vertex_args_range = Some(0)..Some(::std::mem::size_of::<VertexArgs>() as u64);
+                let fragment_args_offset = shift_for_alignment(256, vertex_args_range.end.unwrap());
+                let fragment_args_range = Some(fragment_args_offset)
+                    ..Some(fragment_args_offset + ::std::mem::size_of::<FragmentArgs>() as u64);
                 let buffer = factory
                     .create_buffer(
                         fragment_args_range.end.unwrap(),
@@ -217,30 +219,30 @@ where
                         )),
                     })),
                 );
+
+                cbuf.update_buffer(
+                    buffer.borrow(),
+                    vertex_args_range.start.unwrap(),
+                    cast_slice(&[vertex_args]),
+                );
+                cbuf.update_buffer(
+                    buffer.borrow(),
+                    fragment_args_range.start.unwrap(),
+                    cast_slice(&[fragment_args]),
+                );
+                cbuf.pipeline_barrier(
+                    PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER|PipelineStage::FRAGMENT_SHADER,
+                    Dependencies::empty(),
+                    Some(Barrier::Buffer {
+                        target: buffer.borrow(),
+                        states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
+                    }),
+                );
                 Cache {
                     uniforms: vec![buffer],
                     set,
                 }
             });
-
-            cbuf.update_buffer(
-                cache.uniforms[0].borrow(),
-                vertex_args_range.start.unwrap(),
-                cast_slice(&[vertex_args]),
-            );
-            cbuf.update_buffer(
-                cache.uniforms[0].borrow(),
-                fragment_args_range.start.unwrap(),
-                cast_slice(&[fragment_args]),
-            );
-            cbuf.pipeline_barrier(
-                PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER|PipelineStage::FRAGMENT_SHADER,
-                Dependencies::empty(),
-                Some(Barrier::Buffer {
-                    target: cache.uniforms[0].borrow(),
-                    states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
-                }),
-            );
         }
     }
 
@@ -251,6 +253,7 @@ where
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         scene: &Scene<B, ObjectData>,
     ) {
+        profile!("DrawColorDepthNormal::draw");
         for object in &scene.objects {
             encoder.bind_graphics_descriptor_sets(
                 pipeline,
@@ -262,7 +265,7 @@ where
                 .mesh
                 .bind(&[PosNorm::VERTEX_FORMAT], &mut vbs)
                 .unwrap();
-
+            
             bind.draw(vbs, &mut encoder);
         }
     }
@@ -528,7 +531,7 @@ where
                 0,
                 Some(&unsafe { &*light.cache.get() }.as_ref().unwrap().set),
             );
-            encoder.draw(0..6, 0..1);
+            encoder.draw(0..3, 0..1);
         }
     }
 
@@ -591,8 +594,8 @@ where
 
     let sphere = Arc::new(create_sphere(factory));
 
-    for i in 0..=5 {
-        for j in 0..=5 {
+    for i in 0..6 {
+        for j in 0..6 {
             let transform = Matrix4::from_translation(
                 [2.5 * (i as f32) - 6.25, 2.5 * (j as f32) - 6.25, 0.0].into(),
             );

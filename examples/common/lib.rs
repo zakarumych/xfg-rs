@@ -29,7 +29,7 @@ extern crate flame;
 #[cfg(feature = "profile")]
 macro_rules! profile {
     ($name:tt) => {
-        let guard = ::flame::start_guard(concat!("'", $name, "' at : ", line!()));
+        let _guard = ::flame::start_guard(concat!("'", $name, "' @ ", concat!(file!(), ":", line!())));
     }
 }
 
@@ -342,7 +342,7 @@ where
     };
 
     let dur = start.elapsed();
-    
+
     #[cfg(feature = "profile")]
     flame::dump_html(&mut ::std::fs::File::create("profile.html").unwrap()).unwrap();
 

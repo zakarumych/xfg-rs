@@ -17,7 +17,7 @@ extern crate flame;
 #[cfg(feature = "profile")]
 macro_rules! profile {
     ($name:tt) => {
-        let guard = ::flame::start_guard(concat!("'", $name, "' at : ", line!()));
+        let _guard = ::flame::start_guard(concat!("'", $name, "' @ ", concat!(file!(), ":", line!())));
     }
 }
 
