@@ -559,7 +559,7 @@ where
 
     let shaded = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
 
-    graph.add_node(DrawColorDepthNormal::builder()
+    let first = graph.add_node(DrawColorDepthNormal::builder()
         .with_image(ambient_roughness)
         .with_image(emission_metallic)
         .with_image(normal_normal_ambient_occlusion)
@@ -573,6 +573,7 @@ where
         .with_image(normal_normal_ambient_occlusion)
         .with_image(position_depth)
         .with_image(shaded)
+        .with_dependency(first)
     );
 
     shaded
