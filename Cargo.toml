@@ -26,7 +26,7 @@ env_logger = "0.5"
 genmesh = "0.5.0"
 gfx-mesh = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-mesh", rev = "c8bc337" }
 gfx-render = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-render", rev = "32fc70a" }
-glsl-layout = { version = "0.1.1", features = ["cgmath", "gfx"] }
+glsl-layout = { version = "0.2", features = ["cgmath"] }
 winit = "0.13"
 gfx-backend-empty = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "1e959ace6" }
 

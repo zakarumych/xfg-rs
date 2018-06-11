@@ -2,9 +2,14 @@ use std::{
     borrow::Borrow, marker::PhantomData, ops::Range, sync::{atomic::AtomicUsize, Arc},
 };
 
-use chain::{resource::{Buffer, Id, Image}, pass::PassId};
+use chain::{
+    pass::PassId, resource::{Buffer, Id, Image},
+};
 use either::{Either, Left, Right};
-use hal::{buffer, command::ClearValue, format::Format, image, pso::PipelineStage, window::Backbuffer, Backend};
+use hal::{
+    buffer, command::ClearValue, format::Format, image, pso::PipelineStage, window::Backbuffer,
+    Backend,
+};
 
 /// Id of the image.
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq, Hash)]

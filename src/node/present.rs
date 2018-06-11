@@ -4,10 +4,14 @@ use {
         schedule::Submission, sync::SyncData,
     },
     hal::{
-        buffer, command::{ClearColorRaw, ClearDepthStencilRaw, CommandBufferFlags, ImageCopy, RawCommandBuffer, RawLevel},
-        format::{ChannelType, Format}, image, pool::{CommandPoolCreateFlags, RawCommandPool},
-        memory::{Barrier, Dependencies},
-        pso::PipelineStage, queue::{QueueFamily, RawCommandQueue, RawSubmission},
+        buffer,
+        command::{
+            ClearColorRaw, ClearDepthStencilRaw, CommandBufferFlags, ImageCopy, RawCommandBuffer,
+            RawLevel,
+        },
+        format::{ChannelType, Format}, image, memory::{Barrier, Dependencies},
+        pool::{CommandPoolCreateFlags, RawCommandPool}, pso::PipelineStage,
+        queue::{QueueFamily, RawCommandQueue, RawSubmission},
         window::{Backbuffer, FrameSync, Surface, Swapchain, SwapchainConfig}, Backend, Device,
     },
     node::low::{AnyNode, AnyNodeBuilder}, smallvec::SmallVec,
@@ -86,31 +90,39 @@ where
                         cbuf.begin(CommandBufferFlags::EMPTY, Default::default());
                         acquire.map(|acquire| {
                             cbuf.pipeline_barrier(
-                                acquire.states.start.stages .. acquire.states.end.stages,
+                                acquire.states.start.stages..acquire.states.end.stages,
                                 Dependencies::empty(),
                                 Some(Barrier::Image {
-                                    states: (acquire.states.start.access, acquire.states.start.layout) .. (acquire.states.end.access, acquire.states.end.layout),
+                                    states: (
+                                        acquire.states.start.access,
+                                        acquire.states.start.layout,
+                                    )
+                                        ..(acquire.states.end.access, acquire.states.end.layout),
                                     target: resource.image.borrow(),
                                     range: image::SubresourceRange {
                                         aspects: resource.format.aspects(),
                                         levels: 0..1,
                                         layers: 0..1,
-                                    }
-                                })
+                                    },
+                                }),
                             );
                         });
                         cbuf.pipeline_barrier(
-                            PipelineStage::BOTTOM_OF_PIPE .. PipelineStage::TRANSFER,
+                            PipelineStage::BOTTOM_OF_PIPE..PipelineStage::TRANSFER,
                             Dependencies::empty(),
                             Some(Barrier::Image {
-                                states: (image::Access::empty(), image::Layout::Present) .. (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal),
+                                states: (image::Access::empty(), image::Layout::Present)
+                                    ..(
+                                        image::Access::TRANSFER_READ,
+                                        image::Layout::TransferDstOptimal,
+                                    ),
                                 target: backbuffer_image,
                                 range: image::SubresourceRange {
                                     aspects: self.format.aspects(),
                                     levels: 0..1,
                                     layers: 0..1,
-                                }
-                            })
+                                },
+                            }),
                         );
                         cbuf.copy_image(
                             resource.image.borrow(),
@@ -134,31 +146,39 @@ where
                             }),
                         );
                         cbuf.pipeline_barrier(
-                            PipelineStage::TRANSFER .. PipelineStage::TOP_OF_PIPE,
+                            PipelineStage::TRANSFER..PipelineStage::TOP_OF_PIPE,
                             Dependencies::empty(),
                             Some(Barrier::Image {
-                                states: (image::Access::TRANSFER_READ, image::Layout::TransferDstOptimal) .. (image::Access::empty(), image::Layout::Present),
+                                states: (
+                                    image::Access::TRANSFER_READ,
+                                    image::Layout::TransferDstOptimal,
+                                )
+                                    ..(image::Access::empty(), image::Layout::Present),
                                 target: backbuffer_image,
                                 range: image::SubresourceRange {
                                     aspects: self.format.aspects(),
                                     levels: 0..1,
                                     layers: 0..1,
-                                }
-                            })
+                                },
+                            }),
                         );
                         release.map(|release| {
                             cbuf.pipeline_barrier(
-                                release.states.start.stages .. release.states.end.stages,
+                                release.states.start.stages..release.states.end.stages,
                                 Dependencies::empty(),
                                 Some(Barrier::Image {
-                                    states: (release.states.start.access, release.states.start.layout) .. (release.states.end.access, release.states.end.layout),
+                                    states: (
+                                        release.states.start.access,
+                                        release.states.start.layout,
+                                    )
+                                        ..(release.states.end.access, release.states.end.layout),
                                     target: resource.image.borrow(),
                                     range: image::SubresourceRange {
                                         aspects: resource.format.aspects(),
                                         levels: 0..1,
                                         layers: 0..1,
-                                    }
-                                })
+                                    },
+                                }),
                             );
                         });
 
@@ -268,8 +288,7 @@ where
 
         let frame = {
             profile!("Acquire frame");
-            self
-                .swapchain
+            self.swapchain
                 .acquire_frame(FrameSync::Semaphore(&acquire))
                 .id()
         };

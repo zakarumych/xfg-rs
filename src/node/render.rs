@@ -1,11 +1,11 @@
 use std::{
-    borrow::Borrow, iter::{empty, once, Empty}, ops::Range,
+    borrow::Borrow, iter::{empty, once, Empty}, ops::{Index, Range},
 };
 
 use hal::{
     buffer,
     command::{
-        ClearValue, ClearColor, CommandBuffer, CommandBufferFlags, MultiShot, OneShot, Primary,
+        ClearColor, ClearValue, CommandBuffer, CommandBufferFlags, MultiShot, OneShot, Primary,
         RawCommandBuffer, RawLevel, RenderPassInlineEncoder, Submit, Submittable,
     },
     format::{Format, Swizzle}, image, image::Extent, memory::{Barrier, Dependencies},
@@ -19,7 +19,7 @@ use hal::{
         ColorBlendDesc, ColorMask, Comparison, DepthStencilDesc, DepthTest,
         DescriptorSetLayoutBinding, ElemStride, Element, GraphicsPipelineDesc, GraphicsShaderSet,
         InputAssemblerDesc, PipelineCreationFlags, PipelineStage, PrimitiveRestart, Rasterizer,
-        Rect, Viewport, ShaderStageFlags, StencilTest, VertexBufferDesc,
+        Rect, ShaderStageFlags, StencilTest, VertexBufferDesc, Viewport,
     },
     queue::{CommandQueue, Graphics, RawCommandQueue, RawSubmission}, Backend, Device, Primitive,
 };
@@ -30,36 +30,80 @@ use smallvec::SmallVec;
 
 use node::{build::NodeBuilder, BufferInfo, ImageInfo, Node, NodeDesc};
 
+/// Set layout
+#[derive(Clone, Debug, Default)]
+pub struct SetLayout {
+    pub bindings: Vec<DescriptorSetLayoutBinding>,
+}
+
+/// Pipeline layout
+#[derive(Clone, Debug)]
+pub struct Layout {
+    pub sets: Vec<SetLayout>,
+    pub push_constants: Vec<(ShaderStageFlags, Range<u32>)>,
+}
+
+/// Pipeline info
+#[derive(Clone, Debug)]
+pub struct Pipeline {
+    pub layout: usize,
+    pub vertices: Vec<(Vec<Element<Format>>, ElemStride)>,
+    pub colors: Vec<ColorBlendDesc>,
+    pub depth_stencil: Option<DepthStencilDesc>,
+}
+
 /// Render pass desc.
 pub trait RenderPassDesc<B: Backend>: Send + Sync + Sized + 'static {
     /// Name of this pass.
     fn name() -> &'static str;
 
     /// Number of images to sample.
-    fn sampled() -> usize { 0 }
+    fn sampled() -> usize {
+        0
+    }
 
     /// Number of images to use as storage.
-    fn storage() -> usize { 0 }
+    fn storage() -> usize {
+        0
+    }
 
     /// Number of color output images.
     fn colors() -> usize;
 
-    /// Get color blend description for color target by index.
-    fn color_blend(_index: usize) -> ColorBlendDesc {
-        ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)
-    }
-
     /// Is depth image used.
-    fn depth() -> bool { false }
-
-    /// Format of vertices.
-    fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)] {
-        &[]
+    fn depth() -> bool {
+        false
     }
 
-    /// Bindings for the pass.
-    fn bindings() -> &'static [DescriptorSetLayoutBinding] {
-        &[]
+    /// Pipeline layouts
+    fn layouts() -> Vec<Layout> {
+        vec![Layout {
+            sets: Vec::new(),
+            push_constants: Vec::new(),
+        }]
+    }
+
+    /// Graphics pipelines
+    fn pipelines() -> Vec<Pipeline> {
+        vec![Pipeline {
+            layout: 0,
+            vertices: Vec::new(),
+            colors: (0..Self::colors())
+                .map(|_| ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA))
+                .collect(),
+            depth_stencil: if Self::depth() {
+                Some(DepthStencilDesc {
+                    depth: DepthTest::On {
+                        fun: Comparison::LessEqual,
+                        write: true,
+                    },
+                    depth_bounds: false,
+                    stencil: StencilTest::Off,
+                })
+            } else {
+                None
+            },
+        }]
     }
 
     /// Create `NodeBuilder` for this node.
@@ -85,40 +129,42 @@ where
     ///
     /// `aux`       - auxiliary data container. May be anything the implementation desires.
     ///
-    fn load_shader_set<'a>(
+    fn load_shader_sets<'a>(
         storage: &'a mut Vec<B::ShaderModule>,
         device: &mut D,
         aux: &mut T,
-    ) -> GraphicsShaderSet<'a, B>;
+    ) -> Vec<GraphicsShaderSet<'a, B>>;
 
     /// Build pass instance.
-    fn build<I>(
-        sampled: I,
-        storage: I,
-        set: &B::DescriptorSetLayout,
-        device: &mut D,
-        aux: &mut T
-    ) -> Self
+    fn build<I>(sampled: I, storage: I, device: &mut D, aux: &mut T) -> Self
     where
         I: IntoIterator,
         I::Item: Borrow<B::ImageView>;
 
     /// Prepare to record drawing commands.
-    fn prepare(
+    fn prepare<A, S>(
         &mut self,
-        set: &B::DescriptorSetLayout,
+        sets: &A,
         cbuf: &mut CommandBuffer<B, Graphics>,
         device: &mut D,
         aux: &T,
-    );
+    ) where
+        A: Index<usize>,
+        A::Output: Index<usize, Output = S>,
+        S: Borrow<B::DescriptorSetLayout>;
 
     /// Record drawing commands to the command buffer provided.
-    fn draw(
+    fn draw<L, P>(
         &mut self,
-        pipeline: &B::PipelineLayout,
+        layouts: &L,
+        pipelines: &P,
         encoder: RenderPassInlineEncoder<B, Primary>,
         aux: &T,
-    );
+    ) where
+        L: Index<usize>,
+        L::Output: Borrow<B::PipelineLayout>,
+        P: Index<usize>,
+        P::Output: Borrow<B::GraphicsPipeline>;
 
     /// Dispose of the pass.
     fn dispose(self, device: &mut D, aux: &mut T);
@@ -131,9 +177,9 @@ pub struct RenderPassNode<B: Backend, R> {
     extent: Extent,
 
     render_pass: B::RenderPass,
-    set_layout: B::DescriptorSetLayout,
-    pipeline_layout: B::PipelineLayout,
-    graphics_pipeline: B::GraphicsPipeline,
+    pipeline_layouts: Vec<B::PipelineLayout>,
+    set_layouts: Vec<Vec<B::DescriptorSetLayout>>,
+    graphics_pipelines: Vec<B::GraphicsPipeline>,
 
     views: Vec<B::ImageView>,
     framebuffer: B::Framebuffer,
@@ -314,14 +360,18 @@ where
             result
         };
 
-        let clears = (0 .. R::colors()).map(|index| {
-            color_info(index).clear.unwrap_or(ClearValue::Color(ClearColor::Float([0.3, 0.7, 0.9, 1.0])))
-        }).chain(if R::depth() { depth_info().clear } else { None }).collect();
+        trace!("Collect clears for '{}'", R::name());
 
-        trace!("Creating graphics pipeline for '{}'", R::name());
-        let set_layout = device.create_descriptor_set_layout(R::bindings());
-        let pipeline_layout = device
-            .create_pipeline_layout(Some(&set_layout), empty::<(ShaderStageFlags, Range<u32>)>());
+        let clears = (0..R::colors())
+            .map(|index| {
+                color_info(index)
+                    .clear
+                    .unwrap_or(ClearValue::Color(ClearColor::Float([0.3, 0.7, 0.9, 1.0])))
+            })
+            .chain(if R::depth() { depth_info().clear } else { None })
+            .collect();
+
+        trace!("Create views for '{}'", R::name());
 
         let mut extent = None;
 
@@ -371,63 +421,93 @@ where
             h: extent.height as _,
         };
 
-        let graphics_pipeline = {
+        trace!("Creating layouts for '{}'", R::name());
+
+        let (pipeline_layouts, set_layouts): (Vec<_>, Vec<_>) = R::layouts()
+            .into_iter()
+            .map(|layout| {
+                let set_layouts = layout
+                    .sets
+                    .into_iter()
+                    .map(|set| device.create_descriptor_set_layout(set.bindings))
+                    .collect::<Vec<_>>();
+                let pipeline_layout =
+                    device.create_pipeline_layout(&set_layouts, layout.push_constants);
+                (pipeline_layout, set_layouts)
+            })
+            .unzip();
+
+        trace!("Creating graphics pipelines for '{}'", R::name());
+
+        let graphics_pipelines = {
             let mut shaders = Vec::new();
-            let shader_set = R::load_shader_set(&mut shaders, device, aux);
 
-            let mut vertex_buffers = Vec::new();
-            let mut attributes = Vec::new();
+            let pipelines = R::pipelines();
 
-            for &(elemets, stride) in R::vertices() {
-                push_vertex_desc(elemets, stride, &mut vertex_buffers, &mut attributes);
-            }
+            let descs = pipelines
+                .iter()
+                .enumerate()
+                .zip(R::load_shader_sets(&mut shaders, device, aux))
+                .map(|((index, pipeline), shader_set)| {
+                    assert_eq!(pipeline.colors.len(), R::colors());
+                    assert_eq!(pipeline.depth_stencil.is_some(), R::depth());
 
-            let result = device
-                .create_graphics_pipeline(&GraphicsPipelineDesc {
-                    shaders: shader_set,
-                    rasterizer: Rasterizer::FILL,
-                    vertex_buffers,
-                    attributes,
-                    input_assembler: InputAssemblerDesc {
-                        primitive: Primitive::TriangleList,
-                        primitive_restart: PrimitiveRestart::Disabled,
-                    },
-                    blender: BlendDesc {
-                        logic_op: None,
-                        targets: (0..R::colors())
-                            .map(|index| R::color_blend(index))
-                            .collect(),
-                    },
-                    depth_stencil: if R::depth() {
-                        Some(DepthStencilDesc {
-                            depth: DepthTest::On {
-                                fun: Comparison::LessEqual,
-                                write: true,
-                            },
-                            depth_bounds: false,
-                            stencil: StencilTest::Off,
-                        })
-                    } else {
-                        None
-                    },
-                    multisampling: None,
-                    baked_states: BakedStates {
-                        viewport: Some(Viewport {rect, depth: 0.0 .. 1.0 }),
-                        scissor: Some(rect),
-                        blend_color: None,
-                        depth_bounds: None,
-                    },
-                    layout: &pipeline_layout,
-                    subpass: Subpass {
-                        index: 0,
-                        main_pass: &render_pass,
-                    },
-                    flags: PipelineCreationFlags::empty(),
-                    parent: BasePipeline::None,
-                })
+                    let mut vertex_buffers = Vec::new();
+                    let mut attributes = Vec::new();
+
+                    for &(ref elemets, stride) in &pipeline.vertices {
+                        push_vertex_desc(elemets, stride, &mut vertex_buffers, &mut attributes);
+                    }
+
+                    GraphicsPipelineDesc {
+                        shaders: shader_set,
+                        rasterizer: Rasterizer::FILL,
+                        vertex_buffers,
+                        attributes,
+                        input_assembler: InputAssemblerDesc {
+                            primitive: Primitive::TriangleList,
+                            primitive_restart: PrimitiveRestart::Disabled,
+                        },
+                        blender: BlendDesc {
+                            logic_op: None,
+                            targets: pipeline.colors.clone(),
+                        },
+                        depth_stencil: pipeline.depth_stencil,
+                        multisampling: None,
+                        baked_states: BakedStates {
+                            viewport: Some(Viewport {
+                                rect,
+                                depth: 0.0..1.0,
+                            }),
+                            scissor: Some(rect),
+                            blend_color: None,
+                            depth_bounds: None,
+                        },
+                        layout: &pipeline_layouts[pipeline.layout],
+                        subpass: Subpass {
+                            index: 0,
+                            main_pass: &render_pass,
+                        },
+                        flags: if index == 0 && pipelines.len() > 1 {
+                            PipelineCreationFlags::ALLOW_DERIVATIVES
+                        } else {
+                            PipelineCreationFlags::empty()
+                        },
+                        parent: if index == 0 {
+                            BasePipeline::None
+                        } else {
+                            BasePipeline::Index(0)
+                        },
+                    }
+                });
+
+            let pipelines = device
+                .create_graphics_pipelines(descs)
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()
                 .unwrap();
             trace!("Graphics pipeline created for '{}'", R::name());
-            result
+            pipelines
         };
 
         let mut static_pool = pools(device, CommandPoolCreateFlags::empty()).into_raw();
@@ -456,13 +536,10 @@ where
             );
         }
         for (barrier, image, aspects) in images.iter().filter_map(|info| {
-            info.barriers.acquire.as_ref().map(|barrier| {
-                (
-                    barrier,
-                    info.image.borrow(),
-                    info.format.aspects(),
-                )
-            })
+            info.barriers
+                .acquire
+                .as_ref()
+                .map(|barrier| (barrier, info.image.borrow(), info.format.aspects()))
         }) {
             acquire.pipeline_barrier(
                 barrier.start.1..barrier.end.1,
@@ -478,7 +555,6 @@ where
                 }),
             );
         }
-        acquire.bind_graphics_pipeline(&graphics_pipeline);
         acquire.finish();
 
         let release = if with_release {
@@ -501,13 +577,10 @@ where
             }
 
             for (barrier, image, aspects) in images.iter().filter_map(|info| {
-                info.barriers.release.as_ref().map(|barrier| {
-                    (
-                        barrier,
-                        info.image.borrow(),
-                        info.format.aspects(),
-                    )
-                })
+                info.barriers
+                    .release
+                    .as_ref()
+                    .map(|barrier| (barrier, info.image.borrow(), info.format.aspects()))
             }) {
                 release.pipeline_barrier(
                     barrier.start.1..barrier.end.1,
@@ -530,18 +603,27 @@ where
         };
 
         let framebuffer = device
-            .create_framebuffer(&render_pass, views.iter().skip(R::sampled() + R::storage()), extent)
+            .create_framebuffer(
+                &render_pass,
+                views.iter().skip(R::sampled() + R::storage()),
+                extent,
+            )
             .unwrap();
 
-        let pass = R::build(&views[..R::sampled()], &views[R::sampled() .. R::sampled() + R::storage()], &set_layout, device, aux);
+        let pass = R::build(
+            &views[..R::sampled()],
+            &views[R::sampled()..R::sampled() + R::storage()],
+            device,
+            aux,
+        );
 
         RenderPassNode {
             relevant: Relevant,
             extent,
             render_pass,
-            set_layout: set_layout,
-            pipeline_layout,
-            graphics_pipeline,
+            set_layouts,
+            pipeline_layouts,
+            graphics_pipelines,
             pool: pools(device, CommandPoolCreateFlags::empty()),
             static_pool,
             acquire,
@@ -577,14 +659,9 @@ where
 
         self.pool.reset();
         let mut cbuf = self.pool.acquire_command_buffer::<OneShot>(false);
-
-        {
-            profile!("bind graphics pipeline");
-            cbuf.bind_graphics_pipeline(&self.graphics_pipeline);
-        }
         {
             profile!("Render pass prepare");
-            self.pass.prepare(&self.set_layout, &mut cbuf, device, aux);
+            self.pass.prepare(&self.set_layouts, &mut cbuf, device, aux);
         }
         {
             let encoder = {
@@ -598,7 +675,12 @@ where
             };
             {
                 profile!("Render pass draw");
-                self.pass.draw(&self.pipeline_layout, encoder, aux);
+                self.pass.draw(
+                    &self.pipeline_layouts,
+                    &self.graphics_pipelines,
+                    encoder,
+                    aux,
+                );
             }
         }
 

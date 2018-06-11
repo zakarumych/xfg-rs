@@ -9,8 +9,7 @@ use chain::{
 };
 use either::*;
 use hal::{
-    buffer, format::Format, image,
-    command::ClearValue,
+    buffer, command::ClearValue, format::Format, image,
     queue::{QueueFamily, QueueFamilyId, RawCommandQueue, RawSubmission}, window::Backbuffer,
     Backend, Device,
 };
@@ -68,7 +67,7 @@ where
         let mut fence_index = 0;
 
         profile!("Graph::run");
-        
+
         for family in self.schedule.iter() {
             profile!("Family");
 
@@ -149,7 +148,12 @@ where
     }
 
     /// Create new image owned by graph.
-    pub fn create_image(&mut self, kind: image::Kind, format: Format, clear: Option<ClearValue>) -> ImageId {
+    pub fn create_image(
+        &mut self,
+        kind: image::Kind,
+        format: Format,
+        clear: Option<ClearValue>,
+    ) -> ImageId {
         self.images.push((kind, format, clear));
         ImageId(Id::new(self.images.len() as u32 - 1))
     }
@@ -224,7 +228,10 @@ where
             .iter()
             .enumerate()
             .map(|(index, &size)| {
-                let usage = chains.buffers.get(&Id::new(index as u32)).map_or(buffer::Usage::empty(), |chain| chain.usage());
+                let usage = chains
+                    .buffers
+                    .get(&Id::new(index as u32))
+                    .map_or(buffer::Usage::empty(), |chain| chain.usage());
                 BufferResource {
                     size,
                     buffer: buffer(size, usage, device, aux),
@@ -238,7 +245,10 @@ where
             .iter()
             .enumerate()
             .map(|(index, &(kind, format, clear))| {
-                let usage = chains.images.get(&Id::new(index as u32)).map_or(image::Usage::empty(), |chain| chain.usage());
+                let usage = chains
+                    .images
+                    .get(&Id::new(index as u32))
+                    .map_or(image::Usage::empty(), |chain| chain.usage());
                 ImageResource {
                     kind,
                     format,
@@ -248,7 +258,8 @@ where
             })
             .collect::<Vec<_>>();
 
-        let mut built_nodes: Vec<Option<Box<AnyNode<B, D, T>>>> = (0..nodes.len()).map(|_| None).collect();
+        let mut built_nodes: Vec<Option<Box<AnyNode<B, D, T>>>> =
+            (0..nodes.len()).map(|_| None).collect();
 
         trace!("Synchronize");
         let mut semaphores = GenId::new();

@@ -43,6 +43,7 @@ type Back = backend::Backend;
 use std::{
     borrow::{Borrow, Cow}, cell::UnsafeCell, collections::HashMap, sync::Arc,
     time::{Duration, Instant},
+    ops::{Index, Range},
 };
 
 use cgmath::{Deg, Point3, Matrix4, PerspectiveFov, SquareMatrix, Transform, EuclideanSpace};
@@ -59,7 +60,7 @@ use hal::{
         AllocationError, Descriptor, DescriptorPool, DescriptorRangeDesc,
         DescriptorSetLayoutBinding, DescriptorSetWrite, DescriptorType, ElemStride, Element,
         EntryPoint, GraphicsShaderSet, PipelineStage, Rect, ShaderStageFlags, VertexBufferSet,
-        Viewport, ColorBlendDesc, ColorMask, BlendState,
+        Viewport, ColorBlendDesc, ColorMask, BlendState, DepthTest, Comparison, StencilTest, DepthStencilDesc,
     },
     queue::{Graphics, QueueFamilyId},
     window::{Backbuffer, Extent2D, Frame, FrameSync, Swapchain, SwapchainConfig}, Backend, Device,
@@ -95,13 +96,13 @@ where
     }
 
     /// Allocate descriptor set for the render pass.
-    pub fn allocate<R, D>(
+    pub fn allocate<D>(
         &mut self,
         device: &mut D,
         layout: &B::DescriptorSetLayout,
+        bindings: &[DescriptorSetLayoutBinding]
     ) -> B::DescriptorSet
     where
-        R: RenderPassDesc<B>,
         D: Device<B>,
     {
         let ref mut pools = self.pools;
@@ -120,7 +121,7 @@ where
                     let multiplier = 2usize.pow(exp);
                     let mut pool = device.create_descriptor_pool(
                         multiplier,
-                        bindings_to_range(multiplier, R::bindings()),
+                        bindings_to_range(multiplier, bindings),
                     );
 
                     let set = match pool.allocate_set(layout) {
@@ -169,27 +170,28 @@ pub struct Camera {
     pub projection: Matrix4<f32>,
 }
 
-pub struct Scene<B: Backend, T = ()> {
+pub struct Scene<B: Backend, T = (), Y = ()> {
     pub camera: Camera,
     pub ambient: AmbientLight,
     pub lights: Vec<Light<B>>,
     pub objects: Vec<Object<B, T>>,
+    pub other: Option<Y>,
 }
 
-type XfgGraphBuilder<B, T = ()> = GraphBuilder<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>;
+type XfgGraphBuilder<B, T = (), Y = ()> = GraphBuilder<B, Factory<B>, Scene<B, T, Y>, Buffer<B>, Image<B>>;
 
-struct XfgGraph<B: Backend, T = ()>(Graph<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>);
+struct XfgGraph<B: Backend, T = (), Y = ()>(Graph<B, Factory<B>, Scene<B, T, Y>, Buffer<B>, Image<B>>);
 
-impl<B, T> From<Graph<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>> for XfgGraph<B, T>
+impl<B, T, Y> From<Graph<B, Factory<B>, Scene<B, T, Y>, Buffer<B>, Image<B>>> for XfgGraph<B, T, Y>
 where
     B: Backend,
 {
-    fn from(graph: Graph<B, Factory<B>, Scene<B, T>, Buffer<B>, Image<B>>) -> Self {
+    fn from(graph: Graph<B, Factory<B>, Scene<B, T, Y>, Buffer<B>, Image<B>>) -> Self {
         XfgGraph(graph)
     }
 }
 
-impl<B, T> Render<B, Scene<B, T>> for XfgGraph<B, T>
+impl<B, T, Y> Render<B, Scene<B, T, Y>> for XfgGraph<B, T, Y>
 where
     B: Backend,
 {
@@ -198,22 +200,22 @@ where
         fences: &mut Vec<B::Fence>,
         families: &mut HashMap<QueueFamilyId, Vec<B::CommandQueue>>,
         factory: &mut Factory<B>,
-        scene: &mut Scene<B, T>,
+        scene: &mut Scene<B, T, Y>,
     ) -> usize {
         self.0.run(families, factory, scene, fences)
     }
 
-    fn dispose(self, factory: &mut Factory<B>, scene: &mut Scene<B, T>) -> Backbuffer<B> {
+    fn dispose(self, factory: &mut Factory<B>, scene: &mut Scene<B, T, Y>) -> Backbuffer<B> {
         Graph::dispose(self.0, factory, scene);
         unimplemented!()
     }
 }
 
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan")))]
-pub fn run<G, F, T>(_: G, _: F)
+pub fn run<G, F, T, Y>(_: G, _: F)
 where
-    G: FnOnce(image::Kind, Format, &mut XfgGraphBuilder<Back, T>) -> ImageId,
-    F: FnOnce(&mut Scene<Back, T>, &mut Factory<Back>),
+    G: FnOnce(image::Kind, Format, &mut XfgGraphBuilder<Back, T, Y>) -> ImageId,
+    F: FnOnce(&mut Scene<Back, T, Y>, &mut Factory<Back>),
 {
     env_logger::init();
     error!(
@@ -223,10 +225,10 @@ where
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "gl", feature = "vulkan"))]
 #[deny(dead_code)]
-pub fn run<G, F, T: 'static>(graph: G, fill: F)
+pub fn run<G, F, T: 'static, Y: 'static>(graph: G, fill: F)
 where
-    G: FnOnce(image::Kind, Format, &mut XfgGraphBuilder<Back, T>) -> ImageId,
-    F: FnOnce(&mut Scene<Back, T>, &mut Factory<Back>),
+    G: FnOnce(image::Kind, Format, &mut XfgGraphBuilder<Back, T, Y>) -> ImageId,
+    F: FnOnce(&mut Scene<Back, T, Y>, &mut Factory<Back>),
 {
     use std::iter::once;
 
@@ -241,7 +243,7 @@ where
 
     events_loop.poll_events(|_| ());
 
-    let (mut factory, mut render) = gfx::init::<Back, XfgGraph<Back, T>, _>(|families| {
+    let (mut factory, mut render) = gfx::init::<Back, XfgGraph<Back, T, Y>, _>(|families| {
         families.iter().map(|family| (family, 1)).collect()
     }).unwrap();
     info!("Device features: {:#?}", factory.features());
@@ -259,6 +261,7 @@ where
             transform: Matrix4::identity(),
             projection: Matrix4::identity(),
         },
+        other: None,
     };
 
     events_loop.poll_events(|_| ());
@@ -335,7 +338,7 @@ where
         {
             profile!("Counting");
             total += 1;
-            if start.elapsed() > Duration::from_millis(1000) {
+            if start.elapsed() > Duration::from_millis(10000) {
                 break total;
             }
         }
@@ -384,12 +387,12 @@ fn bindings_to_range(
     ranges
 }
 
-fn create_image<B, T>(
+fn create_image<B, T, Y>(
     kind: image::Kind,
     format: Format,
     usage: image::Usage,
     factory: &mut Factory<B>,
-    _: &mut Scene<B, T>,
+    _: &mut Scene<B, T, Y>,
 ) -> Image<B>
 where
     B: Backend,
@@ -407,11 +410,11 @@ where
         .unwrap()
 }
 
-fn create_buffer<B, T>(
+fn create_buffer<B, T, Y>(
     _: u64,
     _: buffer::Usage,
     _: &mut Factory<B>,
-    _: &mut Scene<B, T>,
+    _: &mut Scene<B, T, Y>,
 ) -> Buffer<B>
 where
     B: Backend,

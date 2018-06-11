@@ -1,4 +1,3 @@
-
 #![deny(unused_must_use)]
 #![allow(unused_imports)]
 #![allow(dead_code)]
@@ -7,7 +6,7 @@ include!("../common/lib.rs");
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct ObjectData {
+struct Material {
     albedo: [f32; 3],
     metallic: f32,
     emission: [f32; 3],
@@ -20,29 +19,13 @@ struct DrawColorDepthNormal<B: Backend> {
     pool: XfgDescriptorPool<B>,
 }
 
-impl<B> RenderPassDesc<B> for DrawColorDepthNormal<B>
+impl<B> DrawColorDepthNormal<B>
 where
     B: Backend,
 {
-    fn name() -> &'static str {
-        "DrawColorDepthNormal"
-    }
-
-    fn colors() -> usize {
-        4
-    }
-
-    fn color_blend(index: usize) -> ColorBlendDesc {
-        ColorBlendDesc::EMPTY
-    }
-
-    fn depth() -> bool {
-        true
-    }
-
-    fn vertices() -> &'static [(&'static [Element<Format>], ElemStride)] {
-        let vertices: &'static [(&'static [Element<Format>], ElemStride)] = &[(
-            &[
+    fn vertices() -> Vec<(Vec<Element<Format>>, ElemStride)> {
+        let vertices = vec![(
+            vec![
                 Element {
                     format: Format::Rgb32Float,
                     offset: 0,
@@ -55,12 +38,7 @@ where
             24,
         )];
 
-        assert!(
-            vertices[0]
-                .0
-                .iter()
-                .eq(&*PosNorm::VERTEX_FORMAT.attributes)
-        );
+        assert!(vertices[0].0.iter().eq(&*PosNorm::VERTEX_FORMAT.attributes));
 
         vertices
     }
@@ -83,15 +61,57 @@ where
     }
 }
 
-impl<B> RenderPass<B, Factory<B>, Scene<B, ObjectData>> for DrawColorDepthNormal<B>
+impl<B> RenderPassDesc<B> for DrawColorDepthNormal<B>
 where
     B: Backend,
 {
-    fn load_shader_set<'a>(
+    fn name() -> &'static str {
+        "DrawColorDepthNormal"
+    }
+
+    fn colors() -> usize {
+        4
+    }
+
+    fn depth() -> bool {
+        true
+    }
+
+    fn layouts() -> Vec<Layout> {
+        vec![Layout {
+            sets: vec![SetLayout {
+                bindings: Self::bindings().iter().cloned().collect(),
+            }],
+            push_constants: Vec::new(),
+        }]
+    }
+
+    fn pipelines() -> Vec<Pipeline> {
+        vec![Pipeline {
+            layout: 0,
+            vertices: Self::vertices(),
+            colors: vec![ColorBlendDesc(ColorMask::ALL, BlendState::Off); 4],
+            depth_stencil: Some(DepthStencilDesc {
+                depth: DepthTest::On {
+                    fun: Comparison::LessEqual,
+                    write: true,
+                },
+                depth_bounds: false,
+                stencil: StencilTest::Off,
+            }),
+        }]
+    }
+}
+
+impl<B> RenderPass<B, Factory<B>, Scene<B, Material>> for DrawColorDepthNormal<B>
+where
+    B: Backend,
+{
+    fn load_shader_sets<'a>(
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        aux: &mut Scene<B, ObjectData>,
-    ) -> GraphicsShaderSet<'a, B> {
+        aux: &mut Scene<B, Material>,
+    ) -> Vec<GraphicsShaderSet<'a, B>> {
         let offset = storage.len();
         storage.push(
             factory
@@ -104,7 +124,7 @@ where
                 .unwrap(),
         );
 
-        GraphicsShaderSet {
+        vec![GraphicsShaderSet {
             vertex: EntryPoint {
                 entry: "main",
                 module: &storage[offset + 0],
@@ -118,15 +138,14 @@ where
                 module: &storage[offset + 1],
                 specialization: &[],
             }),
-        }
+        }]
     }
 
     fn build<I>(
         _sampled: I,
         _storage: I,
-        _set: &B::DescriptorSetLayout,
         _device: &mut Factory<B>,
-        _aux: &mut Scene<B, ObjectData>,
+        _aux: &mut Scene<B, Material>,
     ) -> Self {
         DrawColorDepthNormal {
             pool: XfgDescriptorPool::new(),
@@ -134,14 +153,20 @@ where
     }
 
     #[inline]
-    fn prepare(
+    fn prepare<A, S>(
         &mut self,
-        set: &B::DescriptorSetLayout,
+        sets: &A,
         cbuf: &mut CommandBuffer<B, Graphics>,
         factory: &mut Factory<B>,
-        scene: &Scene<B, ObjectData>,
-    ) {
+        scene: &Scene<B, Material>,
+    ) where
+        A: Index<usize>,
+        A::Output: Index<usize, Output = S>,
+        S: Borrow<B::DescriptorSetLayout>,
+    {
         use std::iter::once;
+
+        let set = sets[0][0].borrow();
 
         #[repr(C)]
         #[derive(Clone, Copy, Debug, PartialEq)]
@@ -199,7 +224,7 @@ where
                         buffer::Usage::UNIFORM | buffer::Usage::TRANSFER_DST,
                     )
                     .unwrap();
-                let set = self.pool.allocate::<Self, _>(factory, set);
+                let set = self.pool.allocate(factory, set, Self::bindings());
                 factory.write_descriptor_sets(
                     once(DescriptorSetWrite {
                         set: &set,
@@ -231,7 +256,8 @@ where
                     cast_slice(&[fragment_args]),
                 );
                 cbuf.pipeline_barrier(
-                    PipelineStage::TRANSFER..PipelineStage::VERTEX_SHADER|PipelineStage::FRAGMENT_SHADER,
+                    PipelineStage::TRANSFER
+                        ..PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
                     Dependencies::empty(),
                     Some(Barrier::Buffer {
                         target: buffer.borrow(),
@@ -246,17 +272,26 @@ where
         }
     }
 
-    #[inline]
-    fn draw(
+    fn draw<L, P>(
         &mut self,
-        pipeline: &B::PipelineLayout,
+        layouts: &L,
+        pipelines: &P,
         mut encoder: RenderPassInlineEncoder<B, Primary>,
-        scene: &Scene<B, ObjectData>,
-    ) {
+        scene: &Scene<B, Material>,
+    ) where
+        L: Index<usize>,
+        L::Output: Borrow<B::PipelineLayout>,
+        P: Index<usize>,
+        P::Output: Borrow<B::GraphicsPipeline>,
+    {
+        let pipeline = pipelines[0].borrow();
+        encoder.bind_graphics_pipeline(pipeline);
+        let layout = layouts[0].borrow();
+
         profile!("DrawColorDepthNormal::draw");
         for object in &scene.objects {
             encoder.bind_graphics_descriptor_sets(
-                pipeline,
+                layout,
                 0,
                 Some(&unsafe { &*object.cache.get() }.as_ref().unwrap().set),
             );
@@ -265,12 +300,12 @@ where
                 .mesh
                 .bind(&[PosNorm::VERTEX_FORMAT], &mut vbs)
                 .unwrap();
-            
+
             bind.draw(vbs, &mut encoder);
         }
     }
 
-    fn dispose(mut self, factory: &mut Factory<B>, scene: &mut Scene<B, ObjectData>) {
+    fn dispose(mut self, factory: &mut Factory<B>, scene: &mut Scene<B, Material>) {
         for object in &mut scene.objects {
             for cache in unsafe { &mut *object.cache.get() }.take() {
                 self.pool.free(cache.set);
@@ -291,30 +326,10 @@ struct DrawLights<B: Backend> {
 unsafe impl<B: Backend> Send for DrawLights<B> {}
 unsafe impl<B: Backend> Sync for DrawLights<B> {}
 
-impl<B> RenderPassDesc<B> for DrawLights<B>
+impl<B> DrawLights<B>
 where
     B: Backend,
 {
-    fn name() -> &'static str {
-        "DrawLights"
-    }
-
-    fn storage() -> usize {
-        4
-    }
-
-    fn colors() -> usize {
-        1
-    }
-
-    fn color_blend(_: usize) -> ColorBlendDesc {
-        ColorBlendDesc(ColorMask::ALL, BlendState::ADD)
-    }
-
-    fn depth() -> bool {
-        false
-    }
-
     fn bindings() -> &'static [DescriptorSetLayoutBinding] {
         &[
             DescriptorSetLayoutBinding {
@@ -351,15 +366,61 @@ where
     }
 }
 
+impl<B> RenderPassDesc<B> for DrawLights<B>
+where
+    B: Backend,
+{
+    fn name() -> &'static str {
+        "DrawLights"
+    }
+
+    fn storage() -> usize {
+        4
+    }
+
+    fn colors() -> usize {
+        1
+    }
+
+    fn depth() -> bool {
+        false
+    }
+
+    fn layouts() -> Vec<Layout> {
+        vec![Layout {
+            sets: vec![SetLayout {
+                bindings: Self::bindings().iter().cloned().collect(),
+            }],
+            push_constants: Vec::new(),
+        }]
+    }
+
+    fn pipelines() -> Vec<Pipeline> {
+        vec![Pipeline {
+            layout: 0,
+            vertices: Vec::new(),
+            colors: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ADD)],
+            depth_stencil: Some(DepthStencilDesc {
+                depth: DepthTest::On {
+                    fun: Comparison::LessEqual,
+                    write: true,
+                },
+                depth_bounds: false,
+                stencil: StencilTest::Off,
+            }),
+        }]
+    }
+}
+
 impl<B, T> RenderPass<B, Factory<B>, Scene<B, T>> for DrawLights<B>
 where
     B: Backend,
 {
-    fn load_shader_set<'a>(
+    fn load_shader_sets<'a>(
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         aux: &mut Scene<B, T>,
-    ) -> GraphicsShaderSet<'a, B> {
+    ) -> Vec<GraphicsShaderSet<'a, B>> {
         let offset = storage.len();
         storage.push(
             factory
@@ -372,7 +433,7 @@ where
                 .unwrap(),
         );
 
-        GraphicsShaderSet {
+        vec![GraphicsShaderSet {
             vertex: EntryPoint {
                 entry: "main",
                 module: &storage[offset + 0],
@@ -386,16 +447,10 @@ where
                 module: &storage[offset + 1],
                 specialization: &[],
             }),
-        }
+        }]
     }
 
-    fn build<I>(
-        _sampled: I,
-        storage: I,
-        _set: &B::DescriptorSetLayout,
-        factory: &mut Factory<B>,
-        _aux: &mut Scene<B, T>,
-    ) -> Self
+    fn build<I>(_sampled: I, storage: I, factory: &mut Factory<B>, _aux: &mut Scene<B, T>) -> Self
     where
         I: IntoIterator,
         I::Item: Borrow<B::ImageView>,
@@ -412,15 +467,20 @@ where
         }
     }
 
-    #[inline]
-    fn prepare(
+    fn prepare<A, S>(
         &mut self,
-        set: &B::DescriptorSetLayout,
+        sets: &A,
         cbuf: &mut CommandBuffer<B, Graphics>,
         factory: &mut Factory<B>,
         scene: &Scene<B, T>,
-    ) {
+    ) where
+        A: Index<usize>,
+        A::Output: Index<usize, Output = S>,
+        S: Borrow<B::DescriptorSetLayout>,
+    {
         use std::iter::once;
+
+        let set = sets[0][0].borrow();
 
         #[derive(Clone, Copy, Debug, PartialEq)]
         struct FragmentArgs {
@@ -467,37 +527,52 @@ where
                         buffer::Usage::UNIFORM | buffer::Usage::TRANSFER_DST,
                     )
                     .unwrap();
-                let set = self.pool.allocate::<Self, _>(factory, set);
+                let set = self.pool.allocate(factory, set, Self::bindings());
                 factory.write_descriptor_sets(
                     once(DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Image(unsafe {&*self.input[0]}, image::Layout::General)),
+                        descriptors: Some(Descriptor::Image(
+                            unsafe { &*self.input[0] },
+                            image::Layout::General,
+                        )),
                     }).chain(once(DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        descriptors: Some(Descriptor::Image(unsafe {&*self.input[1]}, image::Layout::General)),
-                    })).chain(once(DescriptorSetWrite {
-                        set: &set,
-                        binding: 2,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Image(unsafe {&*self.input[2]}, image::Layout::General)),
-                    })).chain(once(DescriptorSetWrite {
-                        set: &set,
-                        binding: 3,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Image(unsafe {&*self.input[3]}, image::Layout::General)),
-                    })).chain(once(DescriptorSetWrite {
-                        set: &set,
-                        binding: 4,
-                        array_offset: 0,
-                        descriptors: Some(Descriptor::Buffer(
-                            buffer.borrow(),
-                            Some(0)..Some(size),
+                        descriptors: Some(Descriptor::Image(
+                            unsafe { &*self.input[1] },
+                            image::Layout::General,
                         )),
-                    })),
+                    }))
+                        .chain(once(DescriptorSetWrite {
+                            set: &set,
+                            binding: 2,
+                            array_offset: 0,
+                            descriptors: Some(Descriptor::Image(
+                                unsafe { &*self.input[2] },
+                                image::Layout::General,
+                            )),
+                        }))
+                        .chain(once(DescriptorSetWrite {
+                            set: &set,
+                            binding: 3,
+                            array_offset: 0,
+                            descriptors: Some(Descriptor::Image(
+                                unsafe { &*self.input[3] },
+                                image::Layout::General,
+                            )),
+                        }))
+                        .chain(once(DescriptorSetWrite {
+                            set: &set,
+                            binding: 4,
+                            array_offset: 0,
+                            descriptors: Some(Descriptor::Buffer(
+                                buffer.borrow(),
+                                Some(0)..Some(size),
+                            )),
+                        })),
                 );
                 Cache {
                     uniforms: vec![buffer],
@@ -518,16 +593,25 @@ where
         }
     }
 
-    #[inline]
-    fn draw(
+    fn draw<L, P>(
         &mut self,
-        pipeline: &B::PipelineLayout,
+        layouts: &L,
+        pipelines: &P,
         mut encoder: RenderPassInlineEncoder<B, Primary>,
         scene: &Scene<B, T>,
-    ) {
+    ) where
+        L: Index<usize>,
+        L::Output: Borrow<B::PipelineLayout>,
+        P: Index<usize>,
+        P::Output: Borrow<B::GraphicsPipeline>,
+    {
+        let pipeline = pipelines[0].borrow();
+        encoder.bind_graphics_pipeline(pipeline);
+        let layout = layouts[0].borrow();
+
         for light in &scene.lights {
             encoder.bind_graphics_descriptor_sets(
-                pipeline,
+                layout,
                 0,
                 Some(&unsafe { &*light.cache.get() }.as_ref().unwrap().set),
             );
@@ -547,45 +631,75 @@ where
     }
 }
 
-fn graph<B>(kind: image::Kind, surface_format: Format, graph: &mut XfgGraphBuilder<B, ObjectData>) -> ImageId
+fn graph<B>(
+    kind: image::Kind,
+    surface_format: Format,
+    graph: &mut XfgGraphBuilder<B, Material>,
+) -> ImageId
 where
     B: Backend,
 {
-    let ambient_roughness = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-    let emission_metallic = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-    let normal_normal_ambient_occlusion = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-    let position_depth = graph.create_image(kind, Format::Rgba32Float, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-    let depth = graph.create_image(kind, Format::D32Float, Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))));
-
-    let shaded = graph.create_image(kind, surface_format, Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))));
-
-    let first = graph.add_node(DrawColorDepthNormal::builder()
-        .with_image(ambient_roughness)
-        .with_image(emission_metallic)
-        .with_image(normal_normal_ambient_occlusion)
-        .with_image(position_depth)
-        .with_image(depth)
+    let ambient_roughness = graph.create_image(
+        kind,
+        surface_format,
+        Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))),
+    );
+    let emission_metallic = graph.create_image(
+        kind,
+        surface_format,
+        Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))),
+    );
+    let normal_normal_ambient_occlusion = graph.create_image(
+        kind,
+        Format::Rgba32Float,
+        Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))),
+    );
+    let position_depth = graph.create_image(
+        kind,
+        Format::Rgba32Float,
+        Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))),
+    );
+    let depth = graph.create_image(
+        kind,
+        Format::D32Float,
+        Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))),
     );
 
-    graph.add_node(DrawLights::builder()
-        .with_image(ambient_roughness)
-        .with_image(emission_metallic)
-        .with_image(normal_normal_ambient_occlusion)
-        .with_image(position_depth)
-        .with_image(shaded)
-        .with_dependency(first)
+    let shaded = graph.create_image(
+        kind,
+        surface_format,
+        Some(ClearValue::Color(ClearColor::Float([0.0, 0.0, 0.0, 1.0]))),
+    );
+
+    let first = graph.add_node(
+        DrawColorDepthNormal::builder()
+            .with_image(ambient_roughness)
+            .with_image(emission_metallic)
+            .with_image(normal_normal_ambient_occlusion)
+            .with_image(position_depth)
+            .with_image(depth),
+    );
+
+    graph.add_node(
+        DrawLights::builder()
+            .with_image(ambient_roughness)
+            .with_image(emission_metallic)
+            .with_image(normal_normal_ambient_occlusion)
+            .with_image(position_depth)
+            .with_image(shaded)
+            .with_dependency(first),
     );
 
     shaded
 }
 
-fn fill<B>(scene: &mut Scene<B, ObjectData>, factory: &mut Factory<B>)
+fn fill<B>(scene: &mut Scene<B, Material>, factory: &mut Factory<B>)
 where
     B: Backend,
 {
     scene.camera.transform = Matrix4::from_translation([0.0, 0.0, 15.0].into());
 
-    let mut data = ObjectData {
+    let mut data = Material {
         albedo: [1.0; 3],
         metallic: 0.0,
         emission: [0.0, 0.0, 0.0],
@@ -679,7 +793,11 @@ where
 
 fn shift_for_alignment<T>(alignment: T, offset: T) -> T
 where
-    T: From<u8> + ::std::ops::Add<Output = T> + ::std::ops::Sub<Output = T> + ::std::ops::BitOr<Output = T> + PartialOrd,
+    T: From<u8>
+        + ::std::ops::Add<Output = T>
+        + ::std::ops::Sub<Output = T>
+        + ::std::ops::BitOr<Output = T>
+        + PartialOrd,
 {
     if offset > 0.into() && alignment > 0.into() {
         ((offset - 1.into()) | (alignment - 1.into())) + 1.into()

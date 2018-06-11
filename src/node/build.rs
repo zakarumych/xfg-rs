@@ -257,7 +257,10 @@ fn image_info<'a, I, S, W>(
                 format: resource.format,
                 clear: resource.clear.and_then(|clear| {
                     if submission.image(id.0) == 0 {
-                        assert!(link.state().access.is_write(), "First node must do writing in order to be able to clear image");
+                        assert!(
+                            link.state().access.is_write(),
+                            "First node must do writing in order to be able to clear image"
+                        );
                         Some(clear)
                     } else {
                         None
