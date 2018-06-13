@@ -13,8 +13,8 @@ profile = ["gfx-render/profile", "flame"]
 
 [dependencies]
 either = { version = "1.5", features = ["serde"] }
-gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "1e959ace6" }
-gfx-chain = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-chain", rev = "eab1bd5" }
+gfx-hal = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx", rev = "63826ab79" }
+gfx-chain = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-chain", rev = "d5511bd" }
 log = "0.4"
 relevant = "0.1"
 smallvec = "0.4"
@@ -24,17 +24,17 @@ flame = { version = "0.2", optional = true }
 cgmath = "0.16"
 env_logger = "0.5"
 genmesh = "0.5.0"
-gfx-mesh = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-mesh", rev = "c8bc337" }
-gfx-render = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-render", rev = "32fc70a" }
+gfx-mesh = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-mesh", rev = "f7d6012" }
+gfx-render = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-render", rev = "b6452b7" }
 glsl-layout = { version = "0.2", features = ["cgmath"] }
 winit = "0.13"
-gfx-backend-empty = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "1e959ace6" }
+gfx-backend-empty = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "63826ab79" }
 
 [target.'cfg(not(target_os = "macos"))'.dev-dependencies]
-gfx-backend-vulkan = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "1e959ace6" }
+gfx-backend-vulkan = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "63826ab79" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-gfx-backend-metal = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "1e959ace6" }
+gfx-backend-metal = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "63826ab79" }
 
 [target.'cfg(windows)'.dev-dependencies]
-gfx-backend-dx12 = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "1e959ace6" }
+gfx-backend-dx12 = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "63826ab79" }

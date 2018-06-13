@@ -50,12 +50,14 @@ where
                 ty: DescriptorType::UniformBuffer,
                 count: 1,
                 stage_flags: ShaderStageFlags::VERTEX,
+                immutable_samplers: false,
             },
             DescriptorSetLayoutBinding {
                 binding: 1,
                 ty: DescriptorType::UniformBuffer,
                 count: 1,
                 stage_flags: ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
             },
         ]
     }
@@ -91,14 +93,14 @@ where
             layout: 0,
             vertices: Self::vertices(),
             colors: vec![ColorBlendDesc(ColorMask::ALL, BlendState::Off); 4],
-            depth_stencil: Some(DepthStencilDesc {
+            depth_stencil: DepthStencilDesc {
                 depth: DepthTest::On {
                     fun: Comparison::LessEqual,
                     write: true,
                 },
                 depth_bounds: false,
                 stencil: StencilTest::Off,
-            }),
+            },
         }]
     }
 }
@@ -110,7 +112,7 @@ where
     fn load_shader_sets<'a>(
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        aux: &mut Scene<B, Material>,
+        _aux: &mut Scene<B, Material>,
     ) -> Vec<GraphicsShaderSet<'a, B>> {
         let offset = storage.len();
         storage.push(
@@ -196,7 +198,7 @@ where
         for object in &scene.objects {
             profile!("Prepare object");
             let mut cache = unsafe { &mut *object.cache.get() };
-            let cache = cache.get_or_insert_with(|| {
+            cache.get_or_insert_with(|| {
                 profile!("Build cache");
 
                 let vertex_args = VertexArgs {
@@ -294,6 +296,7 @@ where
                 layout,
                 0,
                 Some(&unsafe { &*object.cache.get() }.as_ref().unwrap().set),
+                empty::<DescriptorSetOffset>(),
             );
             let mut vbs = VertexBufferSet(Vec::new());
             let bind = object
@@ -337,30 +340,35 @@ where
                 ty: DescriptorType::StorageImage,
                 count: 1,
                 stage_flags: ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
             },
             DescriptorSetLayoutBinding {
                 binding: 1,
                 ty: DescriptorType::StorageImage,
                 count: 1,
                 stage_flags: ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
             },
             DescriptorSetLayoutBinding {
                 binding: 2,
                 ty: DescriptorType::StorageImage,
                 count: 1,
                 stage_flags: ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
             },
             DescriptorSetLayoutBinding {
                 binding: 3,
                 ty: DescriptorType::StorageImage,
                 count: 1,
                 stage_flags: ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
             },
             DescriptorSetLayoutBinding {
                 binding: 4,
                 ty: DescriptorType::UniformBuffer,
                 count: 1,
                 stage_flags: ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
             },
         ]
     }
@@ -400,14 +408,14 @@ where
             layout: 0,
             vertices: Vec::new(),
             colors: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ADD)],
-            depth_stencil: Some(DepthStencilDesc {
+            depth_stencil: DepthStencilDesc {
                 depth: DepthTest::On {
                     fun: Comparison::LessEqual,
                     write: true,
                 },
                 depth_bounds: false,
                 stencil: StencilTest::Off,
-            }),
+            },
         }]
     }
 }
@@ -419,7 +427,7 @@ where
     fn load_shader_sets<'a>(
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        aux: &mut Scene<B, T>,
+        _aux: &mut Scene<B, T>,
     ) -> Vec<GraphicsShaderSet<'a, B>> {
         let offset = storage.len();
         storage.push(
@@ -450,7 +458,7 @@ where
         }]
     }
 
-    fn build<I>(_sampled: I, storage: I, factory: &mut Factory<B>, _aux: &mut Scene<B, T>) -> Self
+    fn build<I>(_sampled: I, storage: I, _factory: &mut Factory<B>, _aux: &mut Scene<B, T>) -> Self
     where
         I: IntoIterator,
         I::Item: Borrow<B::ImageView>,
@@ -519,7 +527,7 @@ where
 
             let mut cache = unsafe { &mut *light.cache.get() };
 
-            let cache = cache.get_or_insert_with(|| {
+            cache.get_or_insert_with(|| {
                 let buffer = factory
                     .create_buffer(
                         size,
@@ -574,22 +582,23 @@ where
                             )),
                         })),
                 );
+
+                cbuf.update_buffer(buffer.borrow(), 0, cast_slice(&[fragment_args]));
+
+                cbuf.pipeline_barrier(
+                    PipelineStage::TRANSFER..PipelineStage::FRAGMENT_SHADER,
+                    Dependencies::empty(),
+                    Some(Barrier::Buffer {
+                        target: buffer.borrow(),
+                        states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
+                    }),
+                );
+
                 Cache {
                     uniforms: vec![buffer],
                     set,
                 }
             });
-
-            cbuf.update_buffer(cache.uniforms[0].borrow(), 0, cast_slice(&[fragment_args]));
-
-            cbuf.pipeline_barrier(
-                PipelineStage::TRANSFER..PipelineStage::FRAGMENT_SHADER,
-                Dependencies::empty(),
-                Some(Barrier::Buffer {
-                    target: cache.uniforms[0].borrow(),
-                    states: buffer::Access::TRANSFER_WRITE..buffer::Access::SHADER_READ,
-                }),
-            );
         }
     }
 
@@ -614,6 +623,7 @@ where
                 layout,
                 0,
                 Some(&unsafe { &*light.cache.get() }.as_ref().unwrap().set),
+                empty::<DescriptorSetOffset>(),
             );
             encoder.draw(0..3, 0..1);
         }

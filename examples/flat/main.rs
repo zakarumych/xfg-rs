@@ -1,6 +1,6 @@
-// #![deny(unused_imports)]
-#![deny(unused_must_use)]
+#![allow(unused_imports)]
 #![allow(dead_code)]
+#![deny(unused_must_use)]
 
 include!("../common/lib.rs");
 
@@ -55,6 +55,7 @@ where
             ty: DescriptorType::UniformBuffer,
             count: 1,
             stage_flags: ShaderStageFlags::VERTEX,
+            immutable_samplers: false,
         }]
     }
 }
@@ -89,14 +90,14 @@ where
             layout: 0,
             vertices: Self::vertices(),
             colors: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)],
-            depth_stencil: Some(DepthStencilDesc {
+            depth_stencil: DepthStencilDesc {
                 depth: DepthTest::On {
                     fun: Comparison::LessEqual,
                     write: true,
                 },
                 depth_bounds: false,
                 stencil: StencilTest::Off,
-            }),
+            },
         }]
     }
 }
@@ -108,7 +109,7 @@ where
     fn load_shader_sets<'a>(
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        aux: &mut Scene<B>,
+        _aux: &mut Scene<B>,
     ) -> Vec<GraphicsShaderSet<'a, B>> {
         let offset = storage.len();
         storage.push(
@@ -227,6 +228,7 @@ where
                 layout,
                 0,
                 Some(&unsafe { &*object.cache.get() }.as_ref().unwrap().set),
+                empty::<DescriptorSetOffset>(),
             );
             let mut vbs = VertexBufferSet(Vec::new());
             let bind = object

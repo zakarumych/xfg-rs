@@ -12,7 +12,7 @@ use {
         format::{ChannelType, Format}, image, memory::{Barrier, Dependencies},
         pool::{CommandPoolCreateFlags, RawCommandPool}, pso::PipelineStage,
         queue::{QueueFamily, RawCommandQueue, RawSubmission},
-        window::{Backbuffer, FrameSync, Surface, Swapchain, SwapchainConfig}, Backend, Device,
+        window::{Backbuffer, FrameSync, Surface, Swapchain, SwapchainConfig, SurfaceCapabilities}, Backend, Device,
     },
     node::low::{AnyNode, AnyNodeBuilder}, smallvec::SmallVec,
     std::{borrow::Borrow, collections::HashMap, iter::once, mem::replace}, util::*,
@@ -22,19 +22,21 @@ pub struct PresentBuilder<'a, B: Backend> {
     pub(crate) id: ImageId,
     pub(crate) format: Format,
     pub(crate) surface: &'a mut B::Surface,
+    pub(crate) capabilities: SurfaceCapabilities,
     pub(crate) dependencies: Vec<PassId>,
 }
 
 impl<'a, B> PresentBuilder<'a, B>
 where
-    B: Backend,
+   B: Backend,
 {
     /// Create present builder
-    pub fn new(id: ImageId, format: Format, surface: &'a mut B::Surface) -> Self {
+    pub fn new(id: ImageId, format: Format, surface: &'a mut B::Surface, capabilities: SurfaceCapabilities) -> Self {
         PresentBuilder {
             id,
             format,
             surface,
+            capabilities,
             dependencies: Vec::new(),
         }
     }
@@ -60,14 +62,25 @@ where
         D: Device<B>,
         I: Borrow<B::Image>,
     {
+        let extent = self.surface.kind().extent().into();
         let (swapchain, backbuffer) = device.create_swapchain(
             self.surface,
             SwapchainConfig {
                 color_format: self.format,
                 depth_stencil_format: None,
-                image_count: 3,
+                image_count: if self.capabilities.image_count.start <= 3 {
+                    if self.capabilities.image_count.end >= 3 {
+                        3
+                    } else {
+                        self.capabilities.image_count.end
+                    }
+                } else {
+                    self.capabilities.image_count.start
+                },
                 image_usage: image::Usage::TRANSFER_DST,
             },
+            None,
+            &extent,
         );
 
         let mut pool = device.create_command_pool(family.id(), CommandPoolCreateFlags::empty());
@@ -100,7 +113,7 @@ where
                                         ..(acquire.states.end.access, acquire.states.end.layout),
                                     target: resource.image.borrow(),
                                     range: image::SubresourceRange {
-                                        aspects: resource.format.aspects(),
+                                        aspects: resource.format.surface_desc().aspects,
                                         levels: 0..1,
                                         layers: 0..1,
                                     },
@@ -118,7 +131,7 @@ where
                                     ),
                                 target: backbuffer_image,
                                 range: image::SubresourceRange {
-                                    aspects: self.format.aspects(),
+                                    aspects: self.format.surface_desc().aspects,
                                     levels: 0..1,
                                     layers: 0..1,
                                 },
@@ -131,13 +144,13 @@ where
                             image::Layout::TransferDstOptimal,
                             Some(ImageCopy {
                                 src_subresource: image::SubresourceLayers {
-                                    aspects: resource.format.aspects(),
+                                    aspects: resource.format.surface_desc().aspects,
                                     level: 0,
                                     layers: 0..1,
                                 },
                                 src_offset: image::Offset { x: 0, y: 0, z: 0 },
                                 dst_subresource: image::SubresourceLayers {
-                                    aspects: self.format.aspects(),
+                                    aspects: self.format.surface_desc().aspects,
                                     level: 0,
                                     layers: 0..1,
                                 },
@@ -156,7 +169,7 @@ where
                                     ..(image::Access::empty(), image::Layout::Present),
                                 target: backbuffer_image,
                                 range: image::SubresourceRange {
-                                    aspects: self.format.aspects(),
+                                    aspects: self.format.surface_desc().aspects,
                                     levels: 0..1,
                                     layers: 0..1,
                                 },
@@ -174,7 +187,7 @@ where
                                         ..(release.states.end.access, release.states.end.layout),
                                     target: resource.image.borrow(),
                                     range: image::SubresourceRange {
-                                        aspects: resource.format.aspects(),
+                                        aspects: resource.format.surface_desc().aspects,
                                         levels: 0..1,
                                         layers: 0..1,
                                     },
@@ -290,11 +303,11 @@ where
             profile!("Acquire frame");
             self.swapchain
                 .acquire_frame(FrameSync::Semaphore(&acquire))
-                .id()
+                .unwrap()
         };
 
-        self.free = Some(replace(&mut self.per_frame[frame].0, acquire));
-        let (ref acquire, ref release, ref cbuf) = self.per_frame[frame];
+        self.free = Some(replace(&mut self.per_frame[frame as usize].0, acquire));
+        let (ref acquire, ref release, ref cbuf) = self.per_frame[frame as usize];
 
         let submission = RawSubmission {
             wait_semaphores: &wait
@@ -307,7 +320,7 @@ where
         unsafe {
             profile!("Submit");
             queue.submit_raw(submission, fence);
-            queue.present(Some(&mut self.swapchain), Some(release));
+            queue.present(Some((&mut self.swapchain, frame)), Some(release)).unwrap();
         }
     }
 

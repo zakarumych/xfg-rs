@@ -49,7 +49,7 @@ pub struct Pipeline {
     pub layout: usize,
     pub vertices: Vec<(Vec<Element<Format>>, ElemStride)>,
     pub colors: Vec<ColorBlendDesc>,
-    pub depth_stencil: Option<DepthStencilDesc>,
+    pub depth_stencil: DepthStencilDesc,
 }
 
 /// Render pass desc.
@@ -92,16 +92,16 @@ pub trait RenderPassDesc<B: Backend>: Send + Sync + Sized + 'static {
                 .map(|_| ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA))
                 .collect(),
             depth_stencil: if Self::depth() {
-                Some(DepthStencilDesc {
+                DepthStencilDesc {
                     depth: DepthTest::On {
                         fun: Comparison::LessEqual,
                         write: true,
                     },
                     depth_bounds: false,
                     stencil: StencilTest::Off,
-                })
+                }
             } else {
-                None
+                DepthStencilDesc::default()
             },
         }]
     }
@@ -399,7 +399,7 @@ where
                         info.format,
                         Swizzle::NO,
                         image::SubresourceRange {
-                            aspects: info.format.aspects(),
+                            aspects: info.format.surface_desc().aspects,
                             levels: 0..1,
                             layers: 0..1,
                         },
@@ -429,7 +429,7 @@ where
                 let set_layouts = layout
                     .sets
                     .into_iter()
-                    .map(|set| device.create_descriptor_set_layout(set.bindings))
+                    .map(|set| device.create_descriptor_set_layout(set.bindings, empty::<B::Sampler>()))
                     .collect::<Vec<_>>();
                 let pipeline_layout =
                     device.create_pipeline_layout(&set_layouts, layout.push_constants);
@@ -450,7 +450,7 @@ where
                 .zip(R::load_shader_sets(&mut shaders, device, aux))
                 .map(|((index, pipeline), shader_set)| {
                     assert_eq!(pipeline.colors.len(), R::colors());
-                    assert_eq!(pipeline.depth_stencil.is_some(), R::depth());
+                    // assert_eq!(pipeline.depth_stencil.is_some(), R::depth());
 
                     let mut vertex_buffers = Vec::new();
                     let mut attributes = Vec::new();
@@ -539,7 +539,7 @@ where
             info.barriers
                 .acquire
                 .as_ref()
-                .map(|barrier| (barrier, info.image.borrow(), info.format.aspects()))
+                .map(|barrier| (barrier, info.image.borrow(), info.format.surface_desc().aspects))
         }) {
             acquire.pipeline_barrier(
                 barrier.start.1..barrier.end.1,
@@ -580,7 +580,7 @@ where
                 info.barriers
                     .release
                     .as_ref()
-                    .map(|barrier| (barrier, info.image.borrow(), info.format.aspects()))
+                    .map(|barrier| (barrier, info.image.borrow(), info.format.surface_desc().aspects))
             }) {
                 release.pipeline_barrier(
                     barrier.start.1..barrier.end.1,

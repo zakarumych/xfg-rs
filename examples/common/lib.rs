@@ -1,3 +1,4 @@
+
 extern crate cgmath;
 extern crate gfx_hal as hal;
 extern crate gfx_mesh as mesh;
@@ -42,6 +43,7 @@ type Back = backend::Backend;
 
 use std::{
     borrow::{Borrow, Cow}, cell::UnsafeCell, collections::HashMap, sync::Arc,
+    iter::{once, empty},
     time::{Duration, Instant},
     ops::{Index, Range},
 };
@@ -52,7 +54,11 @@ use gfx::{BackendEx, Buffer, Factory, Image, Render, Renderer};
 use glsl_layout::*;
 
 use hal::{
-    buffer, command::{ClearValue, ClearColor, ClearDepthStencil, CommandBuffer, Primary, RenderPassInlineEncoder}, device::WaitFor,
+    buffer, command::{
+        ClearValue, ClearColor, ClearDepthStencil, CommandBuffer, Primary, RenderPassInlineEncoder,
+        DescriptorSetOffset,
+    },
+    device::WaitFor,
     format::{ChannelType, Format}, image, image::{Extent, StorageFlags, Tiling},
     memory::{cast_slice, Barrier, Dependencies, Pod, Properties},
     pool::{CommandPool, CommandPoolCreateFlags},
@@ -63,7 +69,7 @@ use hal::{
         Viewport, ColorBlendDesc, ColorMask, BlendState, DepthTest, Comparison, StencilTest, DepthStencilDesc,
     },
     queue::{Graphics, QueueFamilyId},
-    window::{Backbuffer, Extent2D, Frame, FrameSync, Swapchain, SwapchainConfig}, Backend, Device,
+    window::{Backbuffer, Extent2D, FrameSync, Swapchain, SwapchainConfig}, Backend, Device,
     Instance, PhysicalDevice, Surface,
 };
 
@@ -315,6 +321,7 @@ where
                             surface_id,
                             surface_format,
                             surface,
+                            capabilites,
                         )),
                         factory,
                         scene,
