@@ -282,6 +282,8 @@ where
     {
         trace!("Creating RenderPass instance for '{}'", R::name());
 
+        assert_eq!(R::sampled() + R::storage() + R::colors() + R::depth() as usize, images.len());
+
         let color_info = |index| &images[R::sampled() + R::storage() + index];
         let depth_info = || &images[R::sampled() + R::storage() + R::colors()];
 

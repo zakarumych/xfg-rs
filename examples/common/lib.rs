@@ -3,6 +3,7 @@ extern crate cgmath;
 extern crate gfx_hal as hal;
 extern crate gfx_mesh as mesh;
 extern crate gfx_render as gfx;
+extern crate gfx_memory as memory;
 extern crate genmesh;
 extern crate smallvec;
 extern crate xfg;
@@ -46,20 +47,23 @@ use std::{
     iter::{once, empty},
     time::{Duration, Instant},
     ops::{Index, Range},
+    mem::{size_of, zeroed},
 };
 
 use cgmath::{Deg, Point3, Matrix4, PerspectiveFov, SquareMatrix, Transform, EuclideanSpace};
 
 use gfx::{BackendEx, Buffer, Factory, Image, Render, Renderer};
+use memory::Block;
+
 use glsl_layout::*;
 
 use hal::{
     buffer, command::{
         ClearValue, ClearColor, ClearDepthStencil, CommandBuffer, Primary, RenderPassInlineEncoder,
-        DescriptorSetOffset,
+        DescriptorSetOffset, BufferImageCopy,
     },
     device::WaitFor,
-    format::{ChannelType, Format}, image, image::{Extent, StorageFlags, Tiling},
+    format::{AsFormat, ChannelType, Format, Swizzle, Aspects}, image, image::{Extent, StorageFlags, Tiling},
     memory::{cast_slice, Barrier, Dependencies, Pod, Properties},
     pool::{CommandPool, CommandPoolCreateFlags},
     pso::{
@@ -73,7 +77,7 @@ use hal::{
     Instance, PhysicalDevice, Surface,
 };
 
-use mesh::{AsVertexFormat, Mesh, MeshBuilder, PosColor, PosNorm, Bind};
+use mesh::*;
 
 use smallvec::SmallVec;
 
@@ -345,7 +349,7 @@ where
         {
             profile!("Counting");
             total += 1;
-            if start.elapsed() > Duration::from_millis(10000) {
+            if start.elapsed() > Duration::from_millis(10000000) {
                 break total;
             }
         }
@@ -364,7 +368,6 @@ where
     info!("Average FPS: {}", fps);
 
     events_loop.poll_events(|_| ());
-
 
     // // TODO: Dispose everything properly.
     ::std::process::exit(0);
