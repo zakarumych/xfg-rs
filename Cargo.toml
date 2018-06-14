@@ -28,6 +28,7 @@ gfx-mesh = { version = "0.1.0", git = "https://github.com/omni-viral/gfx-mesh", 
 gfx-render = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-render", rev = "b6452b7" }
 gfx-memory = { version = "0.1.0", git = "https://github.com/gfx-rs/gfx-memory", rev = "38e313a" }
 glsl-layout = { version = "0.2", features = ["cgmath"] }
+rusttype = { version = "0.5.0", features = ["gpu_cache"] }
 winit = "0.13"
 gfx-backend-empty = { version = "0.1", git = "https://github.com/gfx-rs/gfx", rev = "63826ab79" }
 conrod = "*"

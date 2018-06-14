@@ -5,6 +5,8 @@
 #[macro_use]
 extern crate conrod;
 
+extern crate rusttype;
+
 include!("../common/lib.rs");
 
 use conrod::{
@@ -137,10 +139,10 @@ where
                 )],
                 colors: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)],
                 depth_stencil: DepthStencilDesc {
-                    depth: DepthTest::Off/* {
+                    depth: DepthTest::On {
                         fun: Comparison::LessEqual,
                         write: true,
-                    }*/,
+                    },
                     depth_bounds: false,
                     stencil: StencilTest::Off,
                 },
@@ -170,7 +172,6 @@ where
                 .create_shader_module(include_bytes!("geom/frag.spv"))
                 .unwrap(),
         );
-
         storage.push(
             device
                 .create_shader_module(include_bytes!("text/vert.spv"))
@@ -231,10 +232,10 @@ where
         let sampler = factory.create_sampler(image::SamplerInfo::new(image::Filter::Linear, image::WrapMode::Clamp));
 
         let image = factory.create_image(
-            image::Kind::D2(1024, 1024, 1, 1),
+            image::Kind::D2(640, 480, 1, 1),
             1,
             Format::R8Unorm,
-            image::Tiling::Optimal,
+            image::Tiling::Linear,
             Properties::DEVICE_LOCAL,
             image::Usage::TRANSFER_DST|image::Usage::SAMPLED,
             image::StorageFlags::empty(),
@@ -254,7 +255,13 @@ where
         ).unwrap();
 
         ConrodRenderPass {
-            cache: GlyphCache::new(1024, 1024, 0.1, 0.1),
+            cache: ::rusttype::gpu_cache::CacheBuilder {
+                width: 640,
+                height: 480,
+                scale_tolerance: 0.1,
+                position_tolerance: 0.1,
+                pad_glyphs: true,
+            }.build(),
             sampler,
             image,
             view,
@@ -276,6 +283,8 @@ where
         A::Output: Index<usize, Output = S>,
         S: Borrow<B::DescriptorSetLayout>,
     {
+        trace!("Prepare UI rendering");
+
         if scene.other.is_none() {
             return;
         }
@@ -308,6 +317,7 @@ where
                 PrimitiveKind::Text { color, text, font_id } => {
                     let glyphs = text.positioned_glyphs(1.0);
                     for glyph in glyphs {
+                        trace!("Enqueue glyph: {:?}", glyph.pixel_bounding_box());
                         self.cache.queue_glyph(0, glyph.clone());
                     }
                     text_count += glyphs.len() * 6;
@@ -323,6 +333,114 @@ where
                 }
                 _ => {}
             }
+        }
+
+        let ref mut upload = self.upload;
+        let ref image = self.image;
+
+        let mut rects = Vec::new();
+        let mut bytes = Vec::new();
+
+        // Update glyphs
+        self.cache.cache_queued(|rect, data| {
+            rects.push((rect, data.len() as u32));
+            bytes.extend_from_slice(data);
+        }).unwrap();
+
+        if !rects.is_empty() {
+            if let Some(buffer) = upload.take() {
+                if buffer.block().size() >= bytes.len() as u64 {
+                    *upload = Some(buffer);
+                }
+            }
+
+            let upload = &*upload.get_or_insert_with(|| {
+                factory.create_buffer(bytes.len() as u64, Properties::DEVICE_LOCAL, buffer::Usage::TRANSFER_SRC|buffer::Usage::TRANSFER_DST).unwrap()
+            });
+
+            cbuf.pipeline_barrier(
+                PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
+                Dependencies::empty(),
+                Some(Barrier::Buffer {
+                    states: buffer::Access::TRANSFER_READ .. buffer::Access::TRANSFER_WRITE,
+                    target: upload.borrow(),
+                })
+            );
+
+            cbuf.update_buffer(upload.borrow(), 0, &bytes);
+
+            cbuf.pipeline_barrier(
+                PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
+                Dependencies::empty(),
+                Some(Barrier::Buffer {
+                    states: buffer::Access::TRANSFER_WRITE .. buffer::Access::TRANSFER_READ,
+                    target: upload.borrow(),
+                })
+            );
+
+            // Prepare image for transfer
+            cbuf.pipeline_barrier(
+                PipelineStage::FRAGMENT_SHADER .. PipelineStage::TRANSFER,
+                Dependencies::empty(),
+                Some(Barrier::Image {
+                    states: (image::Access::SHADER_READ, image::Layout::General) .. (image::Access::SHADER_READ, image::Layout::General),
+                    target: image.borrow(),
+                    range: image::SubresourceRange {
+                        aspects: Aspects::COLOR,
+                        levels: 0..1,
+                        layers: 0..1,
+                    }
+                })
+            );
+            cbuf.copy_buffer_to_image(
+                upload.borrow(),
+                image.borrow(),
+                image::Layout::General,
+
+                rects.into_iter().scan(0u32, |offset, (rect, len)| {
+                    *offset += len;
+
+                    assert_eq!(rect.width() * rect.height(), len);
+
+                    let copy = BufferImageCopy {
+                        buffer_offset: (*offset - len) as u64,
+                        buffer_width: rect.width(),
+                        buffer_height: len,
+                        image_layers: image::SubresourceLayers {
+                            aspects: Aspects::COLOR,
+                            level: 0,
+                            layers: 0..1,
+                        },
+                        image_offset: image::Offset {
+                            x: rect.min.x as i32,
+                            y: rect.min.y as i32,
+                            z: 0,
+                        },
+                        image_extent: image::Extent {
+                            width: rect.width(),
+                            height: rect.height(),
+                            depth: 1,
+                        },
+                    };
+                    trace!("Copy buffer to image: {:#?}", copy);
+                    Some(copy)
+                }),
+            );
+
+            // Prepare image for render
+            cbuf.pipeline_barrier(
+                PipelineStage::TRANSFER .. PipelineStage::FRAGMENT_SHADER,
+                Dependencies::empty(),
+                Some(Barrier::Image {
+                    states: (image::Access::SHADER_READ, image::Layout::General) .. (image::Access::SHADER_READ, image::Layout::General),
+                    target: self.image.borrow(),
+                    range: image::SubresourceRange {
+                        aspects: Aspects::COLOR,
+                        levels: 0..1,
+                        layers: 0..1,
+                    }
+                })
+            );
         }
 
         let text_size = (text_count * size_of::<PosColorTex>()) as u64;
@@ -367,6 +485,8 @@ where
             let mut depth = 0.01;
 
             let mut text_push = |pos: [f32; 3], uv: [f32; 2], color: [f32; 4], cbuf: &mut CommandBuffer<B, Graphics>| {
+                // trace!("Text push :{:?} :{:?} :{:?}", pos, uv, color);
+
                 if text_count == 3 * 64 {
                     let slice: &[u8] = cast_slice(&text_bucket[..]);
                     cbuf.update_buffer(vertex_buffer, text_offset, slice);
@@ -375,7 +495,7 @@ where
                 }
 
                 text_bucket[text_count] = PosColorTex {
-                    position: Position([pos[0] / 640.0, pos[1] / 480.0, pos[2]]),
+                    position: Position([pos[0] / 320.0 - 1.0, pos[1] / 240.0 - 1.0, pos[2]]),
                     color: Color(color),
                     tex: TexCoord([uv[0], uv[1]]),
                 };
@@ -383,6 +503,8 @@ where
             };
 
             let mut geom_push = |pos: [f32; 3], color: [f32; 4], cbuf: &mut CommandBuffer<B, Graphics>| {
+                // trace!("Geom push :{:?} :{:?}", pos, color);
+
                 if geom_count == 3 * 64 {
                     let slice: &[u8] = cast_slice(&geom_bucket[..]);
                     cbuf.update_buffer(vertex_buffer, geom_offset, slice);
@@ -391,7 +513,7 @@ where
                 }
 
                 geom_bucket[geom_count] = PosColor {
-                    position: Position([pos[0] / 640.0, pos[1] / 480.0, pos[2]]),
+                    position: Position([pos[0] / 320.0, pos[1] / 240.0, pos[2]]),
                     color: Color(color),
                 };
 
@@ -402,17 +524,15 @@ where
             while let Some(primitive) = primitives.next() {
                 match primitive.kind {
                     PrimitiveKind::Text { color, text, font_id } => {
-                        trace!("Render text");
-
-                        let glyphs = text.positioned_glyphs(1.0);
                         let color = color.to_fsa();
+                        let glyphs = text.positioned_glyphs(1.0);
                         for glyph in glyphs {
                             if let Some((uv, pos)) = self.cache.rect_for(0, glyph).unwrap() {
                                 text_push([pos.min.x as f32, pos.min.y as f32, depth], [uv.min.x, uv.min.y], color, cbuf);
                                 text_push([pos.min.x as f32, pos.max.y as f32, depth], [uv.min.x, uv.max.y], color, cbuf);
-                                text_push([pos.max.x as f32, pos.min.y as f32, depth], [uv.max.x, uv.min.y], color, cbuf);
-                                text_push([pos.max.x as f32, pos.min.y as f32, depth], [uv.max.x, uv.min.y], color, cbuf);
                                 text_push([pos.max.x as f32, pos.max.y as f32, depth], [uv.max.x, uv.max.y], color, cbuf);
+                                text_push([pos.max.x as f32, pos.max.y as f32, depth], [uv.max.x, uv.max.y], color, cbuf);
+                                text_push([pos.max.x as f32, pos.min.y as f32, depth], [uv.max.x, uv.min.y], color, cbuf);
                                 text_push([pos.min.x as f32, pos.min.y as f32, depth], [uv.min.x, uv.min.y], color, cbuf);
                             }
                         }
@@ -425,9 +545,9 @@ where
                         let color = color.to_fsa();
                         geom_push([pos.x.start as f32, pos.y.start as f32, depth], color, cbuf);
                         geom_push([pos.x.start as f32, pos.y.end as f32, depth], color, cbuf);
-                        geom_push([pos.x.end as f32, pos.y.start as f32, depth], color, cbuf);
-                        geom_push([pos.x.end as f32, pos.y.start as f32, depth], color, cbuf);
                         geom_push([pos.x.end as f32, pos.y.end as f32, depth], color, cbuf);
+                        geom_push([pos.x.end as f32, pos.y.end as f32, depth], color, cbuf);
+                        geom_push([pos.x.end as f32, pos.y.start as f32, depth], color, cbuf);
                         geom_push([pos.x.start as f32, pos.y.start as f32, depth], color, cbuf);
 
                         depth -= 0.00001;
@@ -460,8 +580,8 @@ where
                     PrimitiveKind::Image { .. } => {
                         warn!("Can't render images yet");
                     }
-                    PrimitiveKind::Other(_) => {
-                        warn!("Can't render custom widgets yet");
+                    PrimitiveKind::Other(other) => {
+                        warn!("Can't render custom widgets yet : {:?}", other.type_id);
                     }
                 }
             }
@@ -473,107 +593,6 @@ where
 
         if geom_count > 0 {
             cbuf.update_buffer(vertex_buffer, geom_offset, cast_slice(&geom_bucket[..geom_count]));
-        }
-
-        let ref mut upload = self.upload;
-        let ref image = self.image;
-        let mut image_updated = false;
-
-        // Update glyphs
-        self.cache.cache_queued(|rect, data| {
-            if !image_updated {
-                image_updated = true;
-
-                // Prepare image for transfer
-                cbuf.pipeline_barrier(
-                    PipelineStage::FRAGMENT_SHADER .. PipelineStage::TRANSFER,
-                    Dependencies::empty(),
-                    Some(Barrier::Image {
-                        states: (image::Access::SHADER_READ, image::Layout::General) .. (image::Access::SHADER_READ, image::Layout::General),
-                        target: image.borrow(),
-                        range: image::SubresourceRange {
-                            aspects: Aspects::COLOR,
-                            levels: 0..1,
-                            layers: 0..1,
-                        }
-                    })
-                );
-            }
-
-            let mut size = data.len() as u64;
-
-            if let Some(buffer) = upload.take() {
-                if buffer.block().size() >= data.len() as u64 {
-                    *upload = Some(buffer);
-                } else {
-                    size = ::std::cmp::max(buffer.block().size() * 2, data.len() as u64);
-                }
-            }
-
-            let upload = &*upload.get_or_insert_with(|| {
-                factory.create_buffer(size, Properties::DEVICE_LOCAL, buffer::Usage::TRANSFER_SRC|buffer::Usage::TRANSFER_DST).unwrap()
-            });
-
-            cbuf.pipeline_barrier(
-                PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
-                Dependencies::empty(),
-                Some(Barrier::Buffer {
-                    states: buffer::Access::TRANSFER_READ .. buffer::Access::TRANSFER_WRITE,
-                    target: upload.borrow(),
-                })
-            );
-            cbuf.update_buffer(upload.borrow(), 0, data);
-            cbuf.pipeline_barrier(
-                PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
-                Dependencies::empty(),
-                Some(Barrier::Buffer {
-                    states: buffer::Access::TRANSFER_WRITE .. buffer::Access::TRANSFER_READ,
-                    target: upload.borrow(),
-                })
-            );
-
-            cbuf.copy_buffer_to_image(
-                upload.borrow(),
-                image.borrow(),
-                image::Layout::General,
-                Some(BufferImageCopy {
-                    buffer_offset: 0,
-                    buffer_width: data.len() as u32,
-                    buffer_height: 1,
-                    image_layers: image::SubresourceLayers {
-                        aspects: Aspects::COLOR,
-                        level: 0,
-                        layers: 0..1,
-                    },
-                    image_offset: image::Offset {
-                        x: rect.min.x as i32,
-                        y: rect.min.y as i32,
-                        z: 0,
-                    },
-                    image_extent: image::Extent {
-                        width: rect.width(),
-                        height: rect.height(),
-                        depth: 1,
-                    },
-                }),
-            );
-        }).unwrap();
-
-        if image_updated {
-            // Prepare image for render
-            cbuf.pipeline_barrier(
-                PipelineStage::TRANSFER .. PipelineStage::FRAGMENT_SHADER,
-                Dependencies::empty(),
-                Some(Barrier::Image {
-                    states: (image::Access::SHADER_READ, image::Layout::General) .. (image::Access::SHADER_READ, image::Layout::General),
-                    target: self.image.borrow(),
-                    range: image::SubresourceRange {
-                        aspects: Aspects::COLOR,
-                        levels: 0..1,
-                        layers: 0..1,
-                    }
-                })
-            );
         }
 
         cbuf.pipeline_barrier(
@@ -662,11 +681,13 @@ where
     B: Backend,
 {
     use conrod::{
-        color, widget::{triangles::{Triangle, Triangles}, Text, Button}, Ui, UiBuilder, Widget,
+        Colorable, Labelable, Positionable, Sizeable, color, widget::{Canvas, Text, Button}, Ui, UiBuilder, Widget, text::Font
     };
 
+    use std::fs::File;
+
     widget_ids!(struct Ids {
-        triangles,
+        canvas,
         text,
         button,
     });
@@ -674,33 +695,33 @@ where
     let mut oval_range = (0.25, 0.75);
 
     let mut ui = UiBuilder::new([640.0, 480.0]).build();
+
+    ui.fonts.insert_from_file("/Users/zakarum/pet/conrod/assets/fonts/NotoSans/NotoSans-Regular.ttf").unwrap();
+
     let ids = Ids::new(ui.widget_id_generator());
 
     {
         let ui = &mut ui.set_widgets();
-        // let rect = ui.rect_of(ui.window).unwrap();
-        // let (l, r, b, t) = rect.l_r_b_t();
-        // let (c1, c2, c3) = (
-        //     color::RED.to_rgb(),
-        //     color::GREEN.to_rgb(),
-        //     color::BLUE.to_rgb(),
-        // );
 
-        // let triangles = [
-        //     Triangle([([l, b], c1), ([l, t], c2), ([r, t], c3)]),
-        //     Triangle([([r, t], c1), ([r, b], c2), ([l, b], c3)]),
-        // ];
-
-        // Triangles::multi_color(triangles.iter().cloned())
-        //     .with_bounding_rect(rect)
-        //     .set(ids.triangles, ui);
+        Canvas::new()
+            .pad(40.0)
+            .set(ids.canvas, ui);
 
         Button::new()
-            .hover_color(color::RED)
-            .press_color(color::GREEN)
+            .middle_of(ids.canvas)
+            .w_h(100.0, 32.0)
+            .color(Rgba(0.2, 0.3, 0.8, 1.0).into())
+            .hover_color(Rgba(0.8, 0.3, 0.2, 1.0).into())
+            .press_color(Rgba(0.3, 0.8, 0.2, 1.0).into())
+            .label("Button")
+            .label_font_size(24)
+            .label_color(Rgba(0.0, 0.0, 0.0, 1.0).into())
             .set(ids.button, ui);
-        
-        // Text::new("QwerTy").set(ids.text, ui);
+
+        Text::new("QwerTy")
+            .top_right_of(ids.canvas)
+            .color(Rgba(0.2, 0.3, 0.8, 1.0).into())
+            .set(ids.text, ui);
     }
 
     scene.other = Some(ui);
