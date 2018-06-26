@@ -253,9 +253,11 @@ where
 
     events_loop.poll_events(|_| ());
 
-    let (mut factory, mut render) = gfx::init::<Back, XfgGraph<Back, T, Y>, _>(|families| {
-        families.iter().map(|family| (family, 1)).collect()
-    }).unwrap();
+    let (mut factory, mut render) = gfx::init::<Back, XfgGraph<Back, T, Y>, _, _>(
+            gfx::FirstAdapter,
+            gfx::queue_picker(|families| families.iter().map(|family| (family, 1)).collect()),
+            gfx::MemoryConfig::default(),
+    ).unwrap();
     info!("Device features: {:#?}", factory.features());
     info!("Device limits: {:#?}", factory.limits());
 
@@ -288,7 +290,7 @@ where
             &mut scene,
             |surface, families, factory, scene| -> Result<_, ::std::io::Error> {
                 profile!("render setup");
-                let (capabilites, formats) = factory.capabilities_and_formats(&surface);
+                let (capabilites, formats, _) = factory.compatibility(&surface);
                 let surface_format = formats.map_or(Format::Rgba8Srgb, |formats| {
                     info!("Surface formats: {:#?}", formats);
                     formats
@@ -413,9 +415,9 @@ where
             1,
             format,
             image::Tiling::Optimal,
-            Properties::DEVICE_LOCAL,
-            usage,
             image::StorageFlags::empty(),
+            usage,
+            Properties::DEVICE_LOCAL,
         )
         .unwrap()
 }

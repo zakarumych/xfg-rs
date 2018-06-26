@@ -282,7 +282,10 @@ where
     {
         trace!("Creating RenderPass instance for '{}'", R::name());
 
-        assert_eq!(R::sampled() + R::storage() + R::colors() + R::depth() as usize, images.len());
+        assert_eq!(
+            R::sampled() + R::storage() + R::colors() + R::depth() as usize,
+            images.len()
+        );
 
         let color_info = |index| &images[R::sampled() + R::storage() + index];
         let depth_info = || &images[R::sampled() + R::storage() + R::colors()];
@@ -431,7 +434,9 @@ where
                 let set_layouts = layout
                     .sets
                     .into_iter()
-                    .map(|set| device.create_descriptor_set_layout(set.bindings, empty::<B::Sampler>()))
+                    .map(|set| {
+                        device.create_descriptor_set_layout(set.bindings, empty::<B::Sampler>())
+                    })
                     .collect::<Vec<_>>();
                 let pipeline_layout =
                     device.create_pipeline_layout(&set_layouts, layout.push_constants);
@@ -538,10 +543,13 @@ where
             );
         }
         for (barrier, image, aspects) in images.iter().filter_map(|info| {
-            info.barriers
-                .acquire
-                .as_ref()
-                .map(|barrier| (barrier, info.image.borrow(), info.format.surface_desc().aspects))
+            info.barriers.acquire.as_ref().map(|barrier| {
+                (
+                    barrier,
+                    info.image.borrow(),
+                    info.format.surface_desc().aspects,
+                )
+            })
         }) {
             acquire.pipeline_barrier(
                 barrier.start.1..barrier.end.1,
@@ -579,10 +587,13 @@ where
             }
 
             for (barrier, image, aspects) in images.iter().filter_map(|info| {
-                info.barriers
-                    .release
-                    .as_ref()
-                    .map(|barrier| (barrier, info.image.borrow(), info.format.surface_desc().aspects))
+                info.barriers.release.as_ref().map(|barrier| {
+                    (
+                        barrier,
+                        info.image.borrow(),
+                        info.format.surface_desc().aspects,
+                    )
+                })
             }) {
                 release.pipeline_barrier(
                     barrier.start.1..barrier.end.1,

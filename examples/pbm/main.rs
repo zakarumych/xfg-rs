@@ -222,8 +222,8 @@ where
                 let buffer = factory
                     .create_buffer(
                         fragment_args_range.end.unwrap(),
-                        Properties::DEVICE_LOCAL,
                         buffer::Usage::UNIFORM | buffer::Usage::TRANSFER_DST,
+                        Properties::DEVICE_LOCAL,
                     )
                     .unwrap();
                 let set = self.pool.allocate(factory, set, Self::bindings());
@@ -531,8 +531,8 @@ where
                 let buffer = factory
                     .create_buffer(
                         size,
-                        Properties::DEVICE_LOCAL,
                         buffer::Usage::UNIFORM | buffer::Usage::TRANSFER_DST,
+                        Properties::DEVICE_LOCAL,
                     )
                     .unwrap();
                 let set = self.pool.allocate(factory, set, Self::bindings());

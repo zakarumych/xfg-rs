@@ -12,7 +12,11 @@ use {
         format::{ChannelType, Format}, image, memory::{Barrier, Dependencies},
         pool::{CommandPoolCreateFlags, RawCommandPool}, pso::PipelineStage,
         queue::{QueueFamily, RawCommandQueue, RawSubmission},
-        window::{Backbuffer, FrameSync, Surface, Swapchain, SwapchainConfig, SurfaceCapabilities}, Backend, Device,
+        window::{
+            Backbuffer, FrameSync, PresentMode, Surface, SurfaceCapabilities, Swapchain,
+            SwapchainConfig,
+        },
+        Backend, Device,
     },
     node::low::{AnyNode, AnyNodeBuilder}, smallvec::SmallVec,
     std::{borrow::Borrow, collections::HashMap, iter::once, mem::replace}, util::*,
@@ -28,10 +32,15 @@ pub struct PresentBuilder<'a, B: Backend> {
 
 impl<'a, B> PresentBuilder<'a, B>
 where
-   B: Backend,
+    B: Backend,
 {
     /// Create present builder
-    pub fn new(id: ImageId, format: Format, surface: &'a mut B::Surface, capabilities: SurfaceCapabilities) -> Self {
+    pub fn new(
+        id: ImageId,
+        format: Format,
+        surface: &'a mut B::Surface,
+        capabilities: SurfaceCapabilities,
+    ) -> Self {
         PresentBuilder {
             id,
             format,
@@ -66,6 +75,7 @@ where
         let (swapchain, backbuffer) = device.create_swapchain(
             self.surface,
             SwapchainConfig {
+                present_mode: PresentMode::Fifo,
                 color_format: self.format,
                 depth_stencil_format: None,
                 image_count: if self.capabilities.image_count.start <= 3 {
@@ -302,7 +312,7 @@ where
         let frame = {
             profile!("Acquire frame");
             self.swapchain
-                .acquire_frame(FrameSync::Semaphore(&acquire))
+                .acquire_image(FrameSync::Semaphore(&acquire))
                 .unwrap()
         };
 
@@ -317,10 +327,13 @@ where
             cmd_buffers: Some(cbuf),
         };
 
+        trace!("Presenting");
         unsafe {
             profile!("Submit");
             queue.submit_raw(submission, fence);
-            queue.present(Some((&mut self.swapchain, frame)), Some(release)).unwrap();
+            queue
+                .present(Some((&mut self.swapchain, frame)), Some(release))
+                .unwrap();
         }
     }
 
