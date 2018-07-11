@@ -785,7 +785,7 @@ where
     let mut ui = UiBuilder::new([640.0, 480.0]).build();
 
     ui.fonts
-        .insert_from_file("/Users/zakarum/pet/conrod/assets/fonts/NotoSans/NotoSans-Regular.ttf")
+        .insert_from_file(format!("{}/examples/ui/Orbitron Medium.ttf", env!("CARGO_MANIFEST_DIR")))
         .unwrap();
 
     let ids = Ids::new(ui.widget_id_generator());
@@ -802,7 +802,6 @@ where
             .hover_color(Rgba(0.8, 0.3, 0.2, 1.0).into())
             .press_color(Rgba(0.3, 0.8, 0.2, 1.0).into())
             .label("Button")
-            .label_font_size(24)
             .label_color(Rgba(0.0, 0.0, 0.0, 1.0).into())
             .set(ids.button, ui);
 
