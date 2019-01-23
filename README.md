@@ -1,3 +1,7 @@
+# Attention
+
+This project is discontinued in favor of [rendy](https://github.com/omni-viral/rendy).
+
 # eXtensible FrameGraph for [`gfx-hal`](https://github.com/gfx-rs/gfx/)
 
 Provides instruments for building complex framegraphs (like those in modern engines) that can orchestrate
